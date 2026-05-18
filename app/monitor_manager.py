@@ -20,13 +20,6 @@ from app.config import EMAIL_FROM, EMAIL_PASSWORD, SMTP_PORT, SMTP_SERVER
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_DEFAULTS: dict[str, Any] = {
-    "email_to": "",
-    "ntfy_topic": "",
-    "poll_interval_seconds": 300,
-}
-
-
 _AUTO_STOP_GRACE = timedelta(hours=36)
 
 
@@ -75,7 +68,7 @@ class MonitorManager:
 
         os.makedirs(data_dir, exist_ok=True)
         if not os.path.exists(self._path):
-            self._write({"monitors": [], "defaults": dict(_DEFAULT_DEFAULTS)})
+            self._write({"monitors": []})
 
     # ── Internal I/O ──────────────────────────────────────────────────────────
 
@@ -160,18 +153,6 @@ class MonitorManager:
             return False
         self._write(data)
         return True
-
-    # ── Defaults ──────────────────────────────────────────────────────────────
-
-    def get_defaults(self) -> dict:
-        """Return the defaults dict."""
-        return self._read().get("defaults", dict(_DEFAULT_DEFAULTS))
-
-    def save_defaults(self, defaults: dict) -> None:
-        """Persist new defaults to disk."""
-        data = self._read()
-        data["defaults"] = defaults
-        self._write(data)
 
     # ── Async Task Lifecycle ──────────────────────────────────────────────────
 
