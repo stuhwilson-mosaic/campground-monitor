@@ -79,15 +79,13 @@ async def wizard_step4(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    user_store = request.app.state.user_store
     manager = request.app.state.manager
-    defaults = manager.get_defaults()
-    monitors = manager.list_monitors()
-    # Collect unique ntfy topics from existing monitors
-    ntfy_topics = list({
-        m.get("ntfy_topic", "")
-        for m in monitors
-        if m.get("ntfy_topic", "")
-    })
+    user_record = user_store.get(user)
+    defaults = dict(user_record.defaults) if user_record else {}
+    # ntfy topics: union of this user's monitors only (so other users' topics don't leak).
+    monitors = manager.list_monitors(owner=user)
+    ntfy_topics = list({m.get("ntfy_topic", "") for m in monitors if m.get("ntfy_topic")})
     default_email = defaults.get("email_to", "")
     return _templates(request).TemplateResponse(
         request,
