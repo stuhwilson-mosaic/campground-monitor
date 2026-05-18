@@ -94,9 +94,12 @@ class MonitorManager:
 
     # ── CRUD ──────────────────────────────────────────────────────────────────
 
-    def list_monitors(self) -> list[dict]:
-        """Return all monitor configs."""
-        return self._read()["monitors"]
+    def list_monitors(self, owner: str | None = None) -> list[dict]:
+        """Return monitor configs, optionally filtered to a single owner."""
+        all_monitors = self._read()["monitors"]
+        if owner is None:
+            return all_monitors
+        return [m for m in all_monitors if m.get("owner") == owner]
 
     def get_monitor(self, monitor_id: str) -> dict | None:
         """Return a single monitor config by ID, or None if not found."""
