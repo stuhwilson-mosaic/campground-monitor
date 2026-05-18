@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_record
 
 router = APIRouter()
 
@@ -21,12 +21,14 @@ async def wizard_new(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    record = get_current_user_record(request)
+    is_admin = bool(record and record.role == "admin")
     catalog = _catalog(request)
     states = catalog.get_states()
     return _templates(request).TemplateResponse(
         request,
         "wizard.html",
-        {"user": user, "states": states},
+        {"user": user, "is_admin": is_admin, "states": states},
     )
 
 
@@ -36,12 +38,14 @@ async def wizard_step1(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    record = get_current_user_record(request)
+    is_admin = bool(record and record.role == "admin")
     catalog = _catalog(request)
     states = catalog.get_states()
     return _templates(request).TemplateResponse(
         request,
         "partials/wizard_step1.html",
-        {"states": states},
+        {"is_admin": is_admin, "states": states},
     )
 
 
@@ -51,12 +55,14 @@ async def wizard_step2(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    record = get_current_user_record(request)
+    is_admin = bool(record and record.role == "admin")
     rec_area_id = request.query_params.get("rec_area_id", "")
     rec_area_name = request.query_params.get("rec_area_name", "")
     return _templates(request).TemplateResponse(
         request,
         "partials/wizard_step2.html",
-        {"rec_area_id": rec_area_id, "rec_area_name": rec_area_name},
+        {"is_admin": is_admin, "rec_area_id": rec_area_id, "rec_area_name": rec_area_name},
     )
 
 
@@ -66,10 +72,12 @@ async def wizard_step3(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    record = get_current_user_record(request)
+    is_admin = bool(record and record.role == "admin")
     return _templates(request).TemplateResponse(
         request,
         "partials/wizard_step3.html",
-        {},
+        {"is_admin": is_admin},
     )
 
 
@@ -79,6 +87,8 @@ async def wizard_step4(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    record = get_current_user_record(request)
+    is_admin = bool(record and record.role == "admin")
     user_store = request.app.state.user_store
     manager = request.app.state.manager
     user_record = user_store.get(user)
@@ -90,7 +100,7 @@ async def wizard_step4(request: Request):
     return _templates(request).TemplateResponse(
         request,
         "partials/wizard_step4.html",
-        {"ntfy_topics": ntfy_topics, "default_email": default_email},
+        {"is_admin": is_admin, "ntfy_topics": ntfy_topics, "default_email": default_email},
     )
 
 
@@ -100,8 +110,10 @@ async def wizard_step5(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    record = get_current_user_record(request)
+    is_admin = bool(record and record.role == "admin")
     return _templates(request).TemplateResponse(
         request,
         "partials/wizard_step5.html",
-        {},
+        {"is_admin": is_admin},
     )

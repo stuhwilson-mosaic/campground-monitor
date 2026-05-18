@@ -24,6 +24,9 @@
       <div class="navbar-links">
         <a href="/dashboard" class="navbar-link{% if request.url.path == '/dashboard' %} active{% endif %}">Dashboard</a>
         <a href="/guide" class="navbar-link{% if request.url.path == '/guide' %} active{% endif %}">Guide</a>
+        {% if is_admin %}
+        <a href="/admin" class="navbar-link{% if request.url.path == '/admin' %} active{% endif %}">Admin</a>
+        {% endif %}
       </div>
       <span class="navbar-user">{{ user }}</span>
       <a href="/logout" class="btn btn-outline-light btn-sm">Logout</a>

@@ -16,5 +16,5 @@ async def monitor_logs(monitor_id: str, request: Request):
     return templates.TemplateResponse(
         request,
         "logs.html",
-        {"user": user.username, "monitor": monitor, "logs": logs},
+        {"user": user.username, "is_admin": user.role == "admin", "monitor": monitor, "logs": logs},
     )
