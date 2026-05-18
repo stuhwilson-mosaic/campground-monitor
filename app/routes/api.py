@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_monitor_access
 
 router = APIRouter(prefix="/api")
 
@@ -28,9 +28,7 @@ def _card_response(request: Request, monitor_id: str) -> HTMLResponse:
 
 @router.post("/monitors/{monitor_id}/start", response_class=HTMLResponse)
 async def start_monitor(monitor_id: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        return HTMLResponse("Unauthorized", status_code=401)
+    require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.start_monitor(monitor_id)
     return _card_response(request, monitor_id)
@@ -38,9 +36,7 @@ async def start_monitor(monitor_id: str, request: Request):
 
 @router.post("/monitors/{monitor_id}/pause", response_class=HTMLResponse)
 async def pause_monitor(monitor_id: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        return HTMLResponse("Unauthorized", status_code=401)
+    require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.pause_monitor(monitor_id)
     return _card_response(request, monitor_id)
@@ -48,9 +44,7 @@ async def pause_monitor(monitor_id: str, request: Request):
 
 @router.post("/monitors/{monitor_id}/stop", response_class=HTMLResponse)
 async def stop_monitor(monitor_id: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        return HTMLResponse("Unauthorized", status_code=401)
+    require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.stop_monitor(monitor_id)
     return _card_response(request, monitor_id)
@@ -58,9 +52,7 @@ async def stop_monitor(monitor_id: str, request: Request):
 
 @router.delete("/monitors/{monitor_id}", response_class=HTMLResponse)
 async def delete_monitor(monitor_id: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        return HTMLResponse("Unauthorized", status_code=401)
+    require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.stop_monitor(monitor_id)
     manager.delete_monitor(monitor_id)
@@ -70,9 +62,7 @@ async def delete_monitor(monitor_id: str, request: Request):
 @router.post("/monitors/{monitor_id}/test-alert")
 async def test_alert(monitor_id: str, request: Request):
     """Send a test notification through the monitor's configured channels."""
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     results = await asyncio.to_thread(manager.send_test_alert, monitor_id)
     return JSONResponse(results)
@@ -106,6 +96,7 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
     manager = request.app.state.manager
+    user_store = request.app.state.user_store
     monitor_id = str(uuid.uuid4())
 
     facilities: list[dict[str, Any]] = []
@@ -122,6 +113,7 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
 
     config: dict[str, Any] = {
         "id": monitor_id,
+        "owner": user,
         "name": body.name,
         "rec_area_name": body.rec_area_name,
         "facilities": facilities,
@@ -139,7 +131,6 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
         "last_check": None,
         "last_result": None,
         "notified_sites": [],
-        # Stats
         "stats": {
             "total_checks": 0,
             "total_alerts": 0,
@@ -155,13 +146,15 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
     if body.status == "running":
         await manager.start_monitor(monitor_id)
 
-    # Save notification defaults
-    defaults = manager.get_defaults()
-    if body.email_to:
-        defaults["email_to"] = body.email_to
-    if body.ntfy_topic:
-        defaults["ntfy_topic"] = body.ntfy_topic
-    manager.save_defaults(defaults)
+    # Defaults now live per-user, not on the manager.
+    user_record = user_store.get(user)
+    if user_record:
+        defaults = dict(user_record.defaults)
+        if body.email_to:
+            defaults["email_to"] = body.email_to
+        if body.ntfy_topic:
+            defaults["ntfy_topic"] = body.ntfy_topic
+        user_store.update_defaults(user, defaults)
 
     return JSONResponse({"id": monitor_id, "status": "ok"})
 
