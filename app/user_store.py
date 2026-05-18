@@ -44,6 +44,7 @@ class UserStore:
         if not os.path.exists(self._path):
             self._write({"users": []})
         self._maybe_bootstrap_admin(bootstrap_username, bootstrap_password)
+        self._migrate_monitors(bootstrap_username)
 
     def _maybe_bootstrap_admin(
         self, username: str | None, password: str | None
@@ -54,6 +55,65 @@ class UserStore:
         if self.list_users():
             return
         self.add(username=username, password=password, role="admin")
+
+    def _migrate_monitors(self, default_owner: str | None) -> None:
+        """One-time migration: backfill `owner` and lift `defaults` into the bootstrap user.
+
+        Idempotent — safe to re-run. If `monitors.json` doesn't exist, no-op.
+        """
+        if not os.path.exists(self._monitors_path):
+            return
+
+        with open(self._monitors_path, encoding="utf-8") as f:
+            data = json.load(f)
+
+        needs_owner_backfill = any(
+            "owner" not in m for m in data.get("monitors", [])
+        )
+        has_top_level_defaults = "defaults" in data
+
+        if not needs_owner_backfill and not has_top_level_defaults:
+            return
+
+        # Write a one-time backup of the pre-migration file.
+        backup = self._monitors_path.replace(".json", ".pre-multiuser.json")
+        if not os.path.exists(backup):
+            with open(backup, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+        # Backfill owner.
+        if needs_owner_backfill:
+            owner = self._normalize_username(default_owner or "")
+            if not owner:
+                # No admin to assign ownership to — leave rows untouched.
+                return
+            for m in data["monitors"]:
+                m.setdefault("owner", owner)
+
+        # Lift defaults into the bootstrap user's record.
+        if has_top_level_defaults and default_owner:
+            uname = self._normalize_username(default_owner)
+            users_data = self._read()
+            for u in users_data["users"]:
+                if u["username"] == uname:
+                    u["defaults"] = dict(data["defaults"])
+                    break
+            self._write(users_data)
+            del data["defaults"]
+
+        # Atomic write of the migrated monitors.json.
+        dir_ = os.path.dirname(self._monitors_path)
+        fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, self._monitors_path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     # ── I/O ───────────────────────────────────────────────────────────────────
 
