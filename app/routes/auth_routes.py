@@ -23,7 +23,7 @@ async def login_submit(
     username: str = Form(...),
     password: str = Form(...),
 ):
-    if check_credentials(username, password):
+    if check_credentials(request.app.state.user_store, username, password):
         cookie_value = create_session_cookie(username)
         response = RedirectResponse(url="/", status_code=303)
         response.set_cookie(
