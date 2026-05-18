@@ -1295,3 +1295,16 @@ h1, h2, h3 {
     /* Share link */
     .share-link-row { flex-direction: column; align-items: stretch; }
 }
+
+/* Owner chip — shown next to monitor name in admin view */
+.owner-chip {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  background: var(--sand-200, #e8e0c8);
+  color: var(--pine-900, #1a2e1a);
+  border-radius: 999px;
+  font-weight: 500;
+  vertical-align: middle;
+}

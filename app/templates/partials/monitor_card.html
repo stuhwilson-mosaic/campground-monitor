@@ -4,7 +4,7 @@
 <div id="monitor-{{ m.id }}" class="monitor-card status-{{ status }}{% if is_past %} past{% endif %}">
   <div class="monitor-card-header">
     <div>
-      <div class="monitor-card-name">{{ m.name | default("Unnamed Monitor") }}</div>
+      <div class="monitor-card-name">{{ m.name | default("Unnamed Monitor") }}{% include "partials/owner_chip.html" %}</div>
       {% if m.rec_area %}
         <div class="monitor-card-meta" style="margin-bottom:.25rem">{{ m.rec_area }}</div>
       {% elif m.rec_area_name %}
