@@ -113,3 +113,72 @@ class UserStore:
             if u["username"] == uname:
                 return self._to_public(u)
         return None
+
+    def verify(self, username: str, password: str) -> User | None:
+        """Return the user record if (username, password) match, else None."""
+        uname = self._normalize_username(username)
+        if not uname or not password:
+            return None
+        for u in self._read()["users"]:
+            if u["username"] == uname:
+                try:
+                    ok = bcrypt.checkpw(
+                        password.encode("utf-8"),
+                        u["password_hash"].encode("utf-8"),
+                    )
+                except ValueError:
+                    return None
+                return self._to_public(u) if ok else None
+        return None
+
+    def list_users(self) -> list[User]:
+        return [self._to_public(u) for u in self._read()["users"]]
+
+    def delete(self, username: str) -> bool:
+        uname = self._normalize_username(username)
+        data = self._read()
+        before = len(data["users"])
+        data["users"] = [u for u in data["users"] if u["username"] != uname]
+        if len(data["users"]) == before:
+            return False
+        self._write(data)
+        return True
+
+    def update_password(self, username: str, new_password: str) -> bool:
+        if not new_password:
+            raise ValueError("password is required")
+        uname = self._normalize_username(username)
+        data = self._read()
+        for u in data["users"]:
+            if u["username"] == uname:
+                u["password_hash"] = bcrypt.hashpw(
+                    new_password.encode("utf-8"), bcrypt.gensalt()
+                ).decode("utf-8")
+                self._write(data)
+                return True
+        return False
+
+    def update_role(self, username: str, new_role: str) -> bool:
+        if new_role not in ("admin", "user"):
+            raise ValueError(f"role must be 'admin' or 'user', got {new_role!r}")
+        uname = self._normalize_username(username)
+        data = self._read()
+        for u in data["users"]:
+            if u["username"] == uname:
+                u["role"] = new_role
+                self._write(data)
+                return True
+        return False
+
+    def update_defaults(self, username: str, defaults: dict) -> bool:
+        uname = self._normalize_username(username)
+        data = self._read()
+        for u in data["users"]:
+            if u["username"] == uname:
+                u["defaults"] = dict(defaults)
+                self._write(data)
+                return True
+        return False
+
+    def admin_count(self) -> int:
+        return sum(1 for u in self._read()["users"] if u["role"] == "admin")
