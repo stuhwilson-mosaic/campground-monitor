@@ -1,0 +1,179 @@
+<div class="wizard-step-content" id="step5-content">
+  <h2 class="step-title">Step 5: Review &amp; Create</h2>
+
+  <div class="review-card">
+    <div class="review-section">
+      <h3 class="review-section-title">Monitor</h3>
+      <dl class="review-dl">
+        <dt>Name</dt>
+        <dd id="rv-name"></dd>
+        <dt>Park</dt>
+        <dd id="rv-park"></dd>
+      </dl>
+    </div>
+
+    <div class="review-section">
+      <h3 class="review-section-title">Facilities</h3>
+      <ul id="rv-facilities" class="review-list"></ul>
+    </div>
+
+    <div class="review-section">
+      <h3 class="review-section-title">Dates</h3>
+      <dl id="rv-dates-dl" class="review-dl"></dl>
+    </div>
+
+    <div class="review-section">
+      <h3 class="review-section-title">Notifications</h3>
+      <dl class="review-dl">
+        <dt>Push (ntfy)</dt>
+        <dd id="rv-ntfy"></dd>
+        <dt>Email</dt>
+        <dd id="rv-email"></dd>
+      </dl>
+    </div>
+  </div>
+
+  <!-- Creation status message -->
+  <div id="create-status" style="display:none;" class="alert"></div>
+
+  <!-- Navigation -->
+  <div class="wizard-nav">
+    <button class="btn btn-outline" onclick="goToStep4Back()">&larr; Back</button>
+    <div class="wizard-nav-actions">
+      <button class="btn btn-outline" onclick="createMonitor(false)">Create Paused</button>
+      <button class="btn btn-primary" onclick="createMonitor(true)">Create &amp; Start</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function appendReviewRow(dl, label, value) {
+  var dt = document.createElement("dt");
+  dt.textContent = label;
+  var dd = document.createElement("dd");
+  dd.textContent = value;
+  dl.appendChild(dt);
+  dl.appendChild(dd);
+}
+
+(function() {
+  // Populate review fields using textContent (no innerHTML — prevents XSS)
+  renderReviewValue("rv-name", wizardData.name || "(none)");
+  renderReviewValue("rv-park", wizardData.rec_area_name || "(none)");
+
+  // Dates — dynamic based on permit vs campground
+  var datesDl = document.getElementById("rv-dates-dl");
+  if (datesDl) {
+    datesDl.replaceChildren();
+    if (wizardData._isPermit) {
+      appendReviewRow(datesDl, "Entry date", wizardData.entry_date || "(none)");
+      appendReviewRow(datesDl, "Party size", String(wizardData.party_size || 1));
+    } else {
+      appendReviewRow(datesDl, "Check-in", wizardData.check_in || "(none)");
+      appendReviewRow(datesDl, "Check-out", wizardData.check_out || "(none)");
+    }
+    var secs = wizardData.poll_interval_seconds || 300;
+    var intervalLabel = secs < 60
+      ? secs + " second" + (secs === 1 ? "" : "s")
+      : (secs / 60) + " minute" + (secs / 60 === 1 ? "" : "s");
+    appendReviewRow(datesDl, "Poll interval", intervalLabel);
+  }
+
+  // Facilities list (with trailhead counts for permits)
+  var ul = document.getElementById("rv-facilities");
+  if (ul) {
+    ul.replaceChildren();
+    if (wizardData.facility_ids && wizardData.facility_ids.length > 0) {
+      wizardData.facility_ids.forEach(function(fid, i) {
+        var name = (wizardData.facility_names || [])[i] || fid;
+        var li = document.createElement("li");
+        var divs = (wizardData.selected_divisions || {})[fid] || [];
+        if (divs.length > 0) {
+          li.textContent = name + " (" + divs.length + " trailhead" + (divs.length === 1 ? "" : "s") + ")";
+        } else {
+          li.textContent = name;
+        }
+        ul.appendChild(li);
+      });
+    } else {
+      var li = document.createElement("li");
+      li.textContent = "(none selected)";
+      ul.appendChild(li);
+    }
+  }
+
+  // Notifications
+  var ntfyText = wizardData.enable_ntfy
+    ? ("Enabled — topic: " + (wizardData.ntfy_topic || "(none)"))
+    : "Disabled";
+  var emailText = wizardData.enable_email
+    ? ("Enabled — " + (wizardData.email_to || "(no address)"))
+    : "Disabled";
+  renderReviewValue("rv-ntfy",  ntfyText);
+  renderReviewValue("rv-email", emailText);
+})();
+
+function goToStep4Back() {
+  setStep(4);
+  htmx.ajax("GET", "/monitors/new/step4",
+    { target: "#wizard-content", swap: "innerHTML" }
+  );
+}
+
+function createMonitor(start) {
+  // Build facility_names map from parallel arrays
+  var facilityNamesMap = {};
+  (wizardData.facility_ids || []).forEach(function(fid, i) {
+    facilityNamesMap[fid] = (wizardData.facility_names || [])[i] || fid;
+  });
+
+  var payload = {
+    name: wizardData.name || "",
+    rec_area_name: wizardData.rec_area_name || "",
+    facility_ids: wizardData.facility_ids || [],
+    facility_names: facilityNamesMap,
+    facility_types: wizardData.facility_types || {},
+    selected_divisions: wizardData.selected_divisions || {},
+    check_in: wizardData.check_in || "",
+    check_out: wizardData.check_out || "",
+    entry_date: wizardData.entry_date || "",
+    party_size: wizardData.party_size || 1,
+    poll_interval_seconds: wizardData.poll_interval_seconds || 300,
+    notify_email: !!wizardData.enable_email,
+    notify_ntfy:  !!wizardData.enable_ntfy,
+    email_to: wizardData.email_to || "",
+    ntfy_topic: wizardData.ntfy_topic || "",
+    status: start ? "running" : "stopped",
+  };
+
+  // Disable buttons while submitting
+  var btns = document.querySelectorAll("#step5-content .btn");
+  btns.forEach(function(b) { b.disabled = true; });
+
+  var statusEl = document.getElementById("create-status");
+
+  fetch("/api/monitors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  .then(function(resp) {
+    if (!resp.ok) {
+      return resp.text().then(function(t) { throw new Error(t); });
+    }
+    return resp.json();
+  })
+  .then(function(data) {
+    // Redirect to dashboard on success
+    window.location.href = "/dashboard";
+  })
+  .catch(function(err) {
+    btns.forEach(function(b) { b.disabled = false; });
+    if (statusEl) {
+      statusEl.style.display = "";
+      statusEl.className = "alert alert-error";
+      statusEl.textContent = "Error creating monitor: " + err.message;
+    }
+  });
+}
+</script>

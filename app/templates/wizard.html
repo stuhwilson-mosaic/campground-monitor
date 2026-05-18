@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}New Monitor — Campground Monitor{% endblock %}
+
+{% block content %}
+<div class="wizard-container">
+  <div class="wizard-header">
+    <h1 class="page-title">New Monitor</h1>
+  </div>
+
+  <!-- 5-step progress bar -->
+  <div class="wizard-progress" id="wizard-progress">
+    <div class="wizard-step active" id="step-indicator-1" data-step="1">
+      <div class="step-circle">1</div>
+      <div class="step-label">Location</div>
+    </div>
+    <div class="wizard-step-connector"></div>
+    <div class="wizard-step" id="step-indicator-2" data-step="2">
+      <div class="step-circle">2</div>
+      <div class="step-label">Facilities</div>
+    </div>
+    <div class="wizard-step-connector"></div>
+    <div class="wizard-step" id="step-indicator-3" data-step="3">
+      <div class="step-circle">3</div>
+      <div class="step-label">Dates</div>
+    </div>
+    <div class="wizard-step-connector"></div>
+    <div class="wizard-step" id="step-indicator-4" data-step="4">
+      <div class="step-circle">4</div>
+      <div class="step-label">Notifications</div>
+    </div>
+    <div class="wizard-step-connector"></div>
+    <div class="wizard-step" id="step-indicator-5" data-step="5">
+      <div class="step-circle">5</div>
+      <div class="step-label">Review</div>
+    </div>
+  </div>
+
+  <!-- Wizard content area — partials load here via HTMX -->
+  <div id="wizard-content"
+       hx-get="/monitors/new/step1"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <div class="loading">Loading&#8230;</div>
+  </div>
+</div>
+
+<script>
+// ── Wizard state ───────────────────────────────────────────────────────────────
+var wizardData = {
+  step: 1,
+  state: "",
+  org: "",
+  rec_area_id: "",
+  rec_area_name: "",
+  facility_ids: [],
+  facility_names: [],
+  facility_types: {},
+  check_in: "",
+  check_out: "",
+  entry_date: "",
+  party_size: 1,
+  poll_interval_seconds: 300,
+  enable_email: false,
+  enable_ntfy: false,
+  ntfy_topic: "",
+  email_to: "",
+  selected_divisions: {},  // {facility_id: [div_id, ...]}
+};
+
+// ── Step navigation ────────────────────────────────────────────────────────────
+function setStep(n) {
+  wizardData.step = n;
+  document.querySelectorAll(".wizard-step").forEach(function(el) {
+    var s = parseInt(el.dataset.step, 10);
+    el.classList.toggle("active", s === n);
+    el.classList.toggle("completed", s < n);
+  });
+}
+
+// ── Step 1: rec area selection ─────────────────────────────────────────────────
+function selectRecArea(id, name) {
+  wizardData.rec_area_id = id;
+  wizardData.rec_area_name = name;
+
+  // Highlight selected item
+  document.querySelectorAll(".rec-area-item").forEach(function(el) {
+    el.classList.remove("selected");
+  });
+  if (event && event.currentTarget) {
+    event.currentTarget.classList.add("selected");
+  }
+
+  // Show selected display — use textContent to prevent XSS
+  var display = document.getElementById("selected-rec-area");
+  if (display) {
+    display.textContent = name;
+    var container = display.closest(".selected-rec-area-container");
+    if (container) {
+      container.style.display = "block";
+    }
+  }
+
+  // Enable Next button
+  var nextBtn = document.getElementById("step1-next-btn");
+  if (nextBtn) {
+    nextBtn.disabled = false;
+  }
+}
+
+function goToStep2() {
+  if (!wizardData.rec_area_id) {
+    alert("Please select a park first.");
+    return;
+  }
+  setStep(2);
+  htmx.ajax("GET",
+    "/monitors/new/step2?rec_area_id=" + encodeURIComponent(wizardData.rec_area_id)
+      + "&rec_area_name=" + encodeURIComponent(wizardData.rec_area_name),
+    { target: "#wizard-content", swap: "innerHTML" }
+  );
+}
+
+// ── Step 2: facility selection ─────────────────────────────────────────────────
+function updateFacilitySelection(checkbox) {
+  var id = checkbox.value;
+  var name = checkbox.dataset.name;
+  var facType = checkbox.dataset.type || "Campground";
+
+  if (checkbox.checked) {
+    if (!wizardData.facility_ids.includes(id)) {
+      wizardData.facility_ids.push(id);
+      wizardData.facility_names.push(name);
+    }
+    wizardData.facility_types[id] = facType;
+
+    // For permits, show trailhead picker below the checkbox
+    if (facType === "Permit") {
+      showDivisionPicker(checkbox, id);
+    }
+  } else {
+    wizardData.facility_ids = wizardData.facility_ids.filter(function(v) { return v !== id; });
+    wizardData.facility_names = wizardData.facility_names.filter(function(v) { return v !== name; });
+    delete wizardData.facility_types[id];
+    delete wizardData.selected_divisions[id];
+
+    // Remove division picker wrapper and count
+    var wrapper = document.getElementById("divisions-wrapper-" + id);
+    if (wrapper) wrapper.remove();
+    var countEl = document.getElementById("div-count-" + id);
+    if (countEl) countEl.remove();
+  }
+  var selCountEl = document.getElementById("selected-facility-count");
+  if (selCountEl) {
+    selCountEl.textContent = wizardData.facility_ids.length + " selected";
+  }
+  var nextBtn = document.getElementById("step2-next-btn");
+  if (nextBtn) {
+    nextBtn.disabled = wizardData.facility_ids.length === 0;
+  }
+}
+
+function showDivisionPicker(checkbox, facilityId) {
+  var existing = document.getElementById("divisions-" + facilityId);
+  if (existing) return;
+
+  // Place the picker OUTSIDE the facility-list scroll container,
+  // after .selected-count, so it doesn't get clipped by overflow
+  var anchor = document.getElementById("selected-facility-count");
+  if (!anchor) anchor = document.getElementById("facility-list");
+  if (!anchor) return;
+
+  // Create a wrapper with a label
+  var wrapper = document.createElement("div");
+  wrapper.id = "divisions-wrapper-" + facilityId;
+  wrapper.className = "division-picker-wrapper";
+
+  var heading = document.createElement("div");
+  heading.className = "division-picker-heading text-small";
+  heading.textContent = "Select trailheads for " + (checkbox.dataset.name || "permit") + ":";
+  wrapper.appendChild(heading);
+
+  var container = document.createElement("div");
+  container.id = "divisions-" + facilityId;
+  container.className = "division-picker";
+  var loadingEl = document.createElement("div");
+  loadingEl.className = "loading";
+  loadingEl.textContent = "Loading trailheads\u2026";
+  container.appendChild(loadingEl);
+  wrapper.appendChild(container);
+
+  anchor.parentElement.insertBefore(wrapper, anchor.nextSibling);
+
+  // Fetch divisions via HTMX
+  htmx.ajax("GET",
+    "/api/permit-divisions?facility_id=" + encodeURIComponent(facilityId),
+    { target: "#divisions-" + facilityId, swap: "innerHTML" }
+  );
+}
+
+function updateDivisionSelection(checkbox, facilityId) {
+  var divId = checkbox.value;
+  if (!wizardData.selected_divisions[facilityId]) {
+    wizardData.selected_divisions[facilityId] = [];
+  }
+  var arr = wizardData.selected_divisions[facilityId];
+  if (checkbox.checked) {
+    if (arr.indexOf(divId) === -1) arr.push(divId);
+  } else {
+    wizardData.selected_divisions[facilityId] = arr.filter(function(v) { return v !== divId; });
+  }
+
+  // Update count display
+  var count = wizardData.selected_divisions[facilityId].length;
+  var countEl = document.getElementById("div-count-" + facilityId);
+  if (!countEl) {
+    var picker = document.getElementById("divisions-" + facilityId);
+    if (picker) {
+      countEl = document.createElement("div");
+      countEl.id = "div-count-" + facilityId;
+      countEl.className = "division-count text-small text-muted";
+      picker.insertAdjacentElement("beforebegin", countEl);
+    }
+  }
+  if (countEl) {
+    countEl.textContent = count > 0
+      ? count + " trailhead" + (count === 1 ? "" : "s") + " selected (others ignored)"
+      : "All trailheads (none specifically selected)";
+  }
+}
+
+function filterDivisions(input, facilityId) {
+  var q = input.value.toLowerCase();
+  var container = document.getElementById("divisions-" + facilityId);
+  if (!container) return;
+  var items = container.querySelectorAll(".division-item");
+  items.forEach(function(el) {
+    var name = el.getAttribute("data-division-name") || "";
+    el.style.display = name.indexOf(q) !== -1 ? "" : "none";
+  });
+}
+
+function goToStep1() {
+  setStep(1);
+  htmx.ajax("GET", "/monitors/new/step1",
+    { target: "#wizard-content", swap: "innerHTML" }
+  );
+}
+
+function goToStep3() {
+  if (wizardData.facility_ids.length === 0) {
+    alert("Please select at least one facility.");
+    return;
+  }
+  setStep(3);
+  htmx.ajax("GET", "/monitors/new/step3",
+    { target: "#wizard-content", swap: "innerHTML" }
+  );
+}
+
+// ── Step 5 review helpers (use textContent, not innerHTML) ────────────────────
+function renderReviewValue(elementId, value) {
+  var el = document.getElementById(elementId);
+  if (el) {
+    el.textContent = value;
+  }
+}
+</script>
+{% endblock %}

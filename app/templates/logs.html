@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Logs — {{ monitor.name }} — Campground Monitor{% endblock %}
+{% block content %}
+<div class="flex-between mb-3">
+  <div>
+    <h2 class="page-title">{{ monitor.name }}</h2>
+    <span class="text-muted text-small">Last {{ logs | length }} API checks</span>
+  </div>
+  <a href="/dashboard" class="btn btn-sm btn-outline-primary">&larr; Dashboard</a>
+</div>
+
+{% if not logs %}
+<div class="log-empty">
+  <p class="text-muted">No checks recorded yet. Start the monitor and wait for the first poll cycle.</p>
+</div>
+{% else %}
+
+<div class="log-list">
+{% for entry in logs %}
+  <div class="log-entry {% if entry.status == 'error' %}log-error{% elif entry.alerted %}log-alert{% endif %}">
+    <div class="log-header">
+      <span class="log-facility">{{ entry.facility_name }}</span>
+      <span class="log-time">{{ entry.timestamp[:19] }}Z</span>
+    </div>
+    <div class="log-details">
+      <span class="log-status-badge {% if entry.status == 'error' %}bad{% elif entry.alerted %}good{% else %}neutral{% endif %}">
+        {% if entry.status == 'error' %}ERROR
+        {% elif entry.alerted %}ALERTED ({{ entry.new_alerts }} new)
+        {% elif entry.sites_found > 0 %}{{ entry.sites_found }} available (already notified)
+        {% else %}No availability
+        {% endif %}
+      </span>
+      {% if entry.entry_date is defined and entry.entry_date %}
+        <span class="text-muted text-small">Entry: {{ entry.entry_date }} &middot; party: {{ entry.party_size | default(1) }}</span>
+      {% else %}
+        <span class="text-muted text-small">{{ entry.check_in }} &rarr; {{ entry.check_out }}</span>
+      {% endif %}
+    </div>
+    {% if entry.status == 'error' %}
+    <div class="log-error-msg">{{ entry.error }}</div>
+    {% endif %}
+    {% if entry.sites is defined and entry.sites %}
+    <details class="log-sites">
+      <summary class="text-small">{{ entry.sites | length }} site(s) found</summary>
+      {% if entry.entry_date is defined and entry.entry_date %}
+      <table class="log-table">
+        <thead><tr><th>Entry Point</th><th>Remaining</th><th>Total</th></tr></thead>
+        <tbody>
+        {% for s in entry.sites %}
+          <tr><td>{{ s.site }}</td><td>{{ s.remaining }}</td><td>{{ s.total }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <table class="log-table">
+        <thead><tr><th>Site</th><th>Loop</th><th>Type</th></tr></thead>
+        <tbody>
+        {% for s in entry.sites %}
+          <tr><td>{{ s.site }}</td><td>{{ s.loop }}</td><td>{{ s.type }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </details>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+
+{% endif %}
+{% endblock %}

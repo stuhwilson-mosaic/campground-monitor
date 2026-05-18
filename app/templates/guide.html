@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Guide — Campground Monitor{% endblock %}
+
+{% block content %}
+<div class="guide-wrapper">
+
+  <div class="guide-hero">
+    <div class="guide-hero-icon">&#9978;</div>
+    <h1>How to Use Campground Monitor</h1>
+    <p>Set up availability alerts for any campground or permit on recreation.gov and get notified the moment a site opens up.</p>
+  </div>
+
+  <!-- How it works -->
+  <div class="guide-section">
+    <h2><span class="section-icon">&#128161;</span> How it works</h2>
+    <p>
+      Popular campgrounds on <strong>recreation.gov</strong> fill up fast — often months in advance.
+      But cancellations happen all the time. Campground Monitor watches for those openings
+      by checking the recreation.gov availability API on a schedule you choose.
+    </p>
+    <p>
+      When a site opens up that matches your dates, you get an instant push notification
+      on your phone (via ntfy) or an email — so you can grab it before anyone else.
+    </p>
+  </div>
+
+  <!-- Creating a monitor -->
+  <div class="guide-section">
+    <h2><span class="section-icon">&#128736;</span> Creating a monitor</h2>
+    <p>
+      Click <strong>"+ New Monitor"</strong> on the dashboard to open the setup wizard.
+      It walks you through five steps:
+    </p>
+    <ol>
+      <li><strong>Location</strong> — Pick a state, then an agency (NPS, USFS, etc.), then search for your park.</li>
+      <li><strong>Facilities</strong> — Select one or more campgrounds or permits within that park. You can filter by type.</li>
+      <li><strong>Dates &amp; schedule</strong> — Set your check-in/check-out dates, give the monitor a name, and choose how often to check (from every 15 seconds to every 30 minutes).</li>
+      <li><strong>Notifications</strong> — Enable push notifications via ntfy and/or email alerts. See the ntfy setup section below.</li>
+      <li><strong>Review</strong> — Confirm everything and create. You can start it immediately or create it paused.</li>
+    </ol>
+    <div class="guide-callout-amber">
+      <h3>&#128337; Polling interval tips</h3>
+      <ul>
+        <li><strong>15–30 seconds</strong> — Best for catching cancellations on highly competitive sites (e.g. Yosemite, Glacier).</li>
+        <li><strong>1–5 minutes</strong> — Good balance for most campgrounds.</li>
+        <li><strong>10–30 minutes</strong> — Fine for less popular sites or long-range monitoring.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Managing monitors -->
+  <div class="guide-section">
+    <h2><span class="section-icon">&#9881;</span> Managing your monitors</h2>
+    <p>Each monitor card on the dashboard shows its status and recent activity. You can:</p>
+    <ul>
+      <li><strong>Start / Pause / Stop</strong> — Control the polling cycle. Paused monitors stay alive but skip checks.</li>
+      <li><strong>Logs</strong> — View the last 20 API checks, including which sites were found and whether alerts were sent.</li>
+      <li><strong>Test Alert</strong> — Send a test notification through your configured channels to verify everything is working.</li>
+      <li><strong>Delete</strong> — Permanently remove a monitor.</li>
+    </ul>
+    <p>
+      When a site becomes available, you'll be notified immediately. If the same site stays available, you'll get
+      a reminder every 15 minutes. If a site disappears and comes back, you'll be re-alerted right away.
+    </p>
+  </div>
+
+  <!-- ntfy setup -->
+  <div class="guide-section">
+    <h2><span class="section-icon">&#128244;</span> Setting up ntfy push notifications</h2>
+    <p>
+      <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> (pronounced "notify") is a free,
+      open-source push notification service. It's the fastest way to get campsite alerts on your phone —
+      notifications arrive in seconds, no email delays.
+    </p>
+
+    <div class="guide-callout">
+      <h3>Quick setup (2 minutes)</h3>
+      <ol>
+        <li>
+          Install the <strong>ntfy app</strong> on your phone:
+          <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">iOS App Store</a> &#183;
+          <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Google Play</a>
+        </li>
+        <li>Open the app and tap the <strong>+</strong> button to subscribe to a topic.</li>
+        <li>
+          Choose a unique topic name — this is like a private channel. Use something specific to you,
+          like <code>camp-yosemite-yourname</code>. Anyone who knows the topic name can subscribe,
+          so don't use something guessable if you want privacy.
+        </li>
+        <li>
+          When creating a monitor here, enter the <strong>same topic name</strong> in the notifications step.
+          The wizard shows a subscribe link you can share with travel companions.
+        </li>
+        <li>
+          That's it. When a campsite opens up, you'll get an instant push notification
+          with the site details and a link to book it on recreation.gov.
+        </li>
+      </ol>
+    </div>
+
+    <p>
+      <strong>No account needed.</strong> ntfy topics are public by default — the topic name itself
+      is the "password". Pick something unique and you're good. You can also subscribe via
+      the web at <code>https://ntfy.sh/your-topic-name</code>.
+    </p>
+  </div>
+
+  <!-- Tips -->
+  <div class="guide-section">
+    <h2><span class="section-icon">&#11088;</span> Tips for success</h2>
+    <ul>
+      <li>Monitor multiple campgrounds in a single monitor — the wizard lets you check several facilities at once.</li>
+      <li>Create separate monitors for different date ranges to cover backup weekends.</li>
+      <li>Use the <strong>Test Alert</strong> button after creating a monitor to confirm notifications are working before you rely on them.</li>
+      <li>Check <strong>Logs</strong> periodically to make sure the monitor isn't hitting errors (e.g. recreation.gov rate limiting).</li>
+      <li>Seasonal campgrounds (like those on Tioga Road in Yosemite) won't show availability until their opening dates are announced. The monitor handles this gracefully — no errors, just "no availability".</li>
+      <li>When you get an alert, <strong>act fast</strong>. Popular cancellations get snapped up within minutes.</li>
+    </ul>
+  </div>
+
+</div>
+{% endblock %}

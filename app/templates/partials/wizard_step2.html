@@ -1,0 +1,70 @@
+<div class="wizard-step-content" id="step2-content">
+  <h2 class="step-title">Step 2: Select Facilities</h2>
+  <p class="step-subtitle">
+    Park: <strong id="step2-park-name"></strong>
+  </p>
+  <script>
+    (function() {
+      var el = document.getElementById("step2-park-name");
+      if (el) {
+        // Use textContent to prevent XSS with user-supplied park name
+        el.textContent = wizardData.rec_area_name || "";
+      }
+    })();
+  </script>
+
+  <!-- Type filter tabs -->
+  <div class="type-tabs" role="tablist">
+    <button class="type-tab active" role="tab"
+            onclick="filterFacilities(this, '')"
+            hx-get="/api/facilities"
+            hx-vals='{"rec_area": "{{ rec_area_id }}"}'
+            hx-target="#facility-list"
+            hx-swap="innerHTML"
+            hx-trigger="click">All</button>
+    <button class="type-tab" role="tab"
+            onclick="filterFacilities(this, 'Campground')"
+            hx-get="/api/facilities"
+            hx-vals='{"rec_area": "{{ rec_area_id }}", "type": "Campground"}'
+            hx-target="#facility-list"
+            hx-swap="innerHTML"
+            hx-trigger="click">Campgrounds</button>
+    <button class="type-tab" role="tab"
+            onclick="filterFacilities(this, 'Permit')"
+            hx-get="/api/facilities"
+            hx-vals='{"rec_area": "{{ rec_area_id }}", "type": "Permit"}'
+            hx-target="#facility-list"
+            hx-swap="innerHTML"
+            hx-trigger="click">Permits</button>
+  </div>
+
+  <!-- Facility list — loaded immediately on step render -->
+  <div id="facility-list"
+       hx-get="/api/facilities?rec_area={{ rec_area_id }}"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       class="facility-list">
+    <div class="loading">Loading facilities&#8230;</div>
+  </div>
+
+  <!-- Selected count -->
+  <div class="selected-count">
+    <span id="selected-facility-count">0 selected</span>
+  </div>
+
+  <!-- Navigation -->
+  <div class="wizard-nav">
+    <button class="btn btn-outline" onclick="goToStep1()">&larr; Back</button>
+    <button id="step2-next-btn" class="btn btn-primary" disabled
+            onclick="goToStep3()">Next &rarr;</button>
+  </div>
+</div>
+
+<script>
+function filterFacilities(btn, type) {
+  document.querySelectorAll(".type-tab").forEach(function(t) {
+    t.classList.remove("active");
+  });
+  btn.classList.add("active");
+}
+</script>

@@ -1,0 +1,95 @@
+{% set is_past = m.check_out is defined and m.check_out < today %}
+{% set status = m.status | default("stopped") %}
+{% set stats = m.stats | default({}) %}
+<div id="monitor-{{ m.id }}" class="monitor-card status-{{ status }}{% if is_past %} past{% endif %}">
+  <div class="monitor-card-header">
+    <div>
+      <div class="monitor-card-name">{{ m.name | default("Unnamed Monitor") }}</div>
+      {% if m.rec_area %}
+        <div class="monitor-card-meta" style="margin-bottom:.25rem">{{ m.rec_area }}</div>
+      {% elif m.rec_area_name %}
+        <div class="monitor-card-meta" style="margin-bottom:.25rem">{{ m.rec_area_name }}</div>
+      {% endif %}
+    </div>
+    <span class="status-badge {{ status }}">{{ status }}</span>
+  </div>
+
+  <div class="monitor-card-meta mb-2">
+    {% if m.facilities %}
+      {% for f in m.facilities %}
+        <span class="status-badge stopped" style="margin-right:.2rem">{{ f.name }}</span>
+      {% endfor %}
+    {% elif m.facility_name %}
+      <span class="status-badge stopped">{{ m.facility_name }}</span>
+    {% endif %}
+  </div>
+
+  <div class="monitor-card-meta">
+    {% if m.entry_date %}
+      <span>Entry: {{ m.entry_date }} &middot; party: {{ m.party_size | default(1) }}</span>
+    {% else %}
+      <span>{{ m.check_in }} &rarr; {{ m.check_out }}</span>
+    {% endif %}
+    &nbsp;&#183;&nbsp;
+    {% set iv = m.poll_interval_seconds | default(300) %}
+    <span>every {% if iv < 60 %}{{ iv | int }}s{% else %}{{ (iv / 60) | int }}m{% endif %}</span>
+    &nbsp;&#183;&nbsp;
+    <span>
+      {% if m.enable_email or m.notify_email %}<span title="Email">&#9993;</span>{% endif %}
+      {% if m.enable_ntfy or m.notify_ntfy %}<span title="ntfy push">&#128276;</span>{% endif %}
+    </span>
+  </div>
+
+  {% if stats %}
+  <div class="monitor-stats mt-2">
+    <span class="stat" title="Total checks">&#128269; {{ stats.total_checks | default(0) }}</span>
+    <span class="stat stat-good" title="Alerts sent">&#9989; {{ stats.total_alerts | default(0) }}</span>
+    <span class="stat stat-bad" title="Errors">&#9888; {{ stats.total_errors | default(0) }}</span>
+    {% set rt = stats.total_runtime_seconds | default(0) %}
+    {% if rt > 0 %}
+    <span class="stat" title="Total runtime">&#9202;
+      {% if rt >= 86400 %}{{ (rt // 86400) | int }}d {% endif %}
+      {% if rt >= 3600 %}{{ ((rt % 86400) // 3600) | int }}h {% endif %}
+      {{ ((rt % 3600) // 60) | int }}m
+    </span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="monitor-card-actions mt-2">
+    {% if status == "running" %}
+      <button class="btn btn-sm btn-outline-primary"
+              hx-post="/api/monitors/{{ m.id }}/pause"
+              hx-target="#monitor-{{ m.id }}"
+              hx-swap="outerHTML">Pause</button>
+      <button class="btn btn-sm btn-outline-primary"
+              hx-post="/api/monitors/{{ m.id }}/stop"
+              hx-target="#monitor-{{ m.id }}"
+              hx-swap="outerHTML">Stop</button>
+    {% elif status == "paused" %}
+      <button class="btn btn-sm btn-primary"
+              hx-post="/api/monitors/{{ m.id }}/start"
+              hx-target="#monitor-{{ m.id }}"
+              hx-swap="outerHTML">Resume</button>
+      <button class="btn btn-sm btn-outline-primary"
+              hx-post="/api/monitors/{{ m.id }}/stop"
+              hx-target="#monitor-{{ m.id }}"
+              hx-swap="outerHTML">Stop</button>
+    {% else %}
+      <button class="btn btn-sm btn-primary"
+              hx-post="/api/monitors/{{ m.id }}/start"
+              hx-target="#monitor-{{ m.id }}"
+              hx-swap="outerHTML">Start</button>
+    {% endif %}
+    <a href="/logs/{{ m.id }}" class="btn btn-sm btn-outline-secondary">Logs</a>
+    <button class="btn btn-sm btn-outline-secondary"
+            hx-post="/api/monitors/{{ m.id }}/test-alert"
+            hx-swap="none"
+            onclick="this.textContent='Sending...'; this.disabled=true; fetch('/api/monitors/{{ m.id }}/test-alert', {method:'POST'}).then(r=>r.json()).then(d=>{let msgs=[]; if(d.ntfy!==undefined) msgs.push('ntfy: '+(d.ntfy?'sent':'failed')); if(d.email!==undefined) msgs.push('email: '+(d.email?'sent':'failed')); alert(msgs.join(', ')||'No channels configured'); this.textContent='Test Alert'; this.disabled=false;}).catch(()=>{alert('Request failed'); this.textContent='Test Alert'; this.disabled=false;})">Test Alert</button>
+    <button class="btn btn-sm btn-outline-danger"
+            hx-delete="/api/monitors/{{ m.id }}"
+            hx-target="#monitor-{{ m.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this monitor?">Delete</button>
+  </div>
+</div>

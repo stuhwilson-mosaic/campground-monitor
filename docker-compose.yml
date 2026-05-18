@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    container_name: campground-monitor
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./data:/data
+      - ./RIDBFullExport_V1_CSV:/ridb:ro
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - RIDB_DIR=/ridb
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run ${CAMP_TUNNEL_ID}
+    depends_on:
+      - app
+    volumes:
+      - ./cloudflared-camp.yml:/etc/cloudflared/config.yml:ro
+      - ${CLOUDFLARED_CREDENTIALS}:/etc/cloudflared/credentials.json:ro
+    restart: unless-stopped

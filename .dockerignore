@@ -1,0 +1,10 @@
+.env
+.git
+.superpowers
+data/
+__pycache__
+*.pyc
+tests/
+docs/
+monitor.py
+*.md

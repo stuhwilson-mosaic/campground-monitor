@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Campground Monitor{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=4">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="https://hub.stuhwilson.com/script.js" data-website-id="4eb30975-4995-42e5-bf44-ccf72ae6c7a5"></script>
+</head>
+<body>
+
+{% block nav %}
+<nav class="navbar">
+  <a href="/dashboard" class="navbar-brand">
+    <span class="brand-icon">&#9978;</span>
+    Campground Monitor
+  </a>
+  <div class="navbar-end">
+    {% if user is defined and user %}
+      <div class="navbar-links">
+        <a href="/dashboard" class="navbar-link{% if request.url.path == '/dashboard' %} active{% endif %}">Dashboard</a>
+        <a href="/guide" class="navbar-link{% if request.url.path == '/guide' %} active{% endif %}">Guide</a>
+      </div>
+      <span class="navbar-user">{{ user }}</span>
+      <a href="/logout" class="btn btn-outline-light btn-sm">Logout</a>
+    {% endif %}
+  </div>
+</nav>
+{% endblock %}
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

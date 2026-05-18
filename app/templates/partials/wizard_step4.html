@@ -1,0 +1,137 @@
+<div class="wizard-step-content" id="step4-content">
+  <h2 class="step-title">Step 4: Notifications</h2>
+
+  <!-- ntfy push notifications -->
+  <div class="form-group">
+    <label class="toggle-label">
+      <input type="checkbox" id="ntfy-toggle" checked
+             onchange="wizardData.enable_ntfy = this.checked; toggleNtfyFields();">
+      Enable push notifications (ntfy)
+    </label>
+  </div>
+
+  <div id="ntfy-fields">
+    <div class="form-group">
+      <label for="ntfy-topic-select" class="form-label">ntfy topic</label>
+      {% if ntfy_topics %}
+      <select id="ntfy-topic-select" class="form-control"
+              onchange="applyNtfyTopic(this.value);">
+        <option value="">— new topic —</option>
+        {% for topic in ntfy_topics %}
+        <option value="{{ topic }}">{{ topic }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <input type="text" id="ntfy-topic-input" class="form-control"
+             placeholder="e.g. camp-yosemite-2026"
+             oninput="wizardData.ntfy_topic = this.value; updateShareLink();">
+    </div>
+
+    <div class="form-group" id="share-link-group">
+      <label class="form-label">Subscribe link</label>
+      <div class="share-link-row">
+        <code id="share-link-display" class="share-link"></code>
+        <button type="button" class="btn btn-sm btn-outline"
+                onclick="copyShareLink()">Copy</button>
+      </div>
+      <p class="form-hint">Open this URL or scan in the ntfy app to receive alerts.</p>
+    </div>
+  </div>
+
+  <!-- Email notifications -->
+  <div class="form-group">
+    <label class="toggle-label">
+      <input type="checkbox" id="email-toggle"
+             onchange="wizardData.enable_email = this.checked; toggleEmailFields();">
+      Enable email notifications
+    </label>
+  </div>
+
+  <div id="email-fields" style="display:none;">
+    <div class="form-group">
+      <label for="email-to-input" class="form-label">Email address</label>
+      <input type="email" id="email-to-input" class="form-control"
+             placeholder="you@example.com"
+             oninput="wizardData.email_to = this.value;">
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <div class="wizard-nav">
+    <button class="btn btn-outline" onclick="goToStep3Back()">&larr; Back</button>
+    <button class="btn btn-primary" onclick="goToStep5()">Next &rarr;</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Restore state
+  var ntfyToggle = document.getElementById("ntfy-toggle");
+  var emailToggle = document.getElementById("email-toggle");
+  var ntfyInput = document.getElementById("ntfy-topic-input");
+  var emailInput = document.getElementById("email-to-input");
+
+  if (ntfyToggle)  ntfyToggle.checked  = wizardData.enable_ntfy !== false;
+  if (emailToggle) emailToggle.checked = !!wizardData.enable_email;
+  if (ntfyInput && wizardData.ntfy_topic) ntfyInput.value = wizardData.ntfy_topic;
+  if (emailInput && wizardData.email_to)  emailInput.value = wizardData.email_to;
+
+  // Sync state
+  wizardData.enable_ntfy  = ntfyToggle  ? ntfyToggle.checked  : true;
+  wizardData.enable_email = emailToggle ? emailToggle.checked : false;
+
+  toggleNtfyFields();
+  toggleEmailFields();
+  updateShareLink();
+})();
+
+function applyNtfyTopic(val) {
+  var input = document.getElementById("ntfy-topic-input");
+  if (val && input) {
+    input.value = val;
+    wizardData.ntfy_topic = val;
+    updateShareLink();
+  }
+}
+
+function toggleNtfyFields() {
+  var fields = document.getElementById("ntfy-fields");
+  if (fields) fields.style.display = wizardData.enable_ntfy ? "" : "none";
+}
+
+function toggleEmailFields() {
+  var fields = document.getElementById("email-fields");
+  if (fields) fields.style.display = wizardData.enable_email ? "" : "none";
+}
+
+function updateShareLink() {
+  var topic = wizardData.ntfy_topic || "";
+  var display = document.getElementById("share-link-display");
+  if (display) {
+    // textContent prevents XSS with user-typed topic
+    display.textContent = topic ? "https://ntfy.sh/" + topic : "";
+  }
+}
+
+function copyShareLink() {
+  var topic = wizardData.ntfy_topic || "";
+  if (!topic) return;
+  navigator.clipboard.writeText("https://ntfy.sh/" + topic).catch(function() {
+    alert("Could not copy — please copy manually: https://ntfy.sh/" + topic);
+  });
+}
+
+function goToStep3Back() {
+  setStep(3);
+  htmx.ajax("GET", "/monitors/new/step3",
+    { target: "#wizard-content", swap: "innerHTML" }
+  );
+}
+
+function goToStep5() {
+  setStep(5);
+  htmx.ajax("GET", "/monitors/new/step5",
+    { target: "#wizard-content", swap: "innerHTML" }
+  );
+}
+</script>

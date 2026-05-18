@@ -1,0 +1,11 @@
+.env
+data/monitors.json
+data/users.json
+data/monitors.pre-multiuser.json
+__pycache__/
+*.pyc
+.superpowers/
+.pytest_cache/
+.playwright-mcp/
+.session_cookies.json
+RIDBFullExport_V1_CSV/

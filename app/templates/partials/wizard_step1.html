@@ -1,0 +1,68 @@
+<div class="wizard-step-content" id="step1-content">
+  <h2 class="step-title">Step 1: Choose a Location</h2>
+
+  <div class="form-row">
+    <!-- State selector -->
+    <div class="form-group">
+      <label for="state-select" class="form-label">State</label>
+      <select id="state-select" name="state" class="form-control"
+              hx-get="/api/agencies"
+              hx-include="[name='state']"
+              hx-target="#agency-select"
+              hx-swap="innerHTML"
+              hx-trigger="change"
+              onchange="wizardData.state = this.value; wizardData.org = ''; document.getElementById('rec-area-results').replaceChildren(); document.getElementById('step1-next-btn').disabled = true;">
+        <option value="">Select a state…</option>
+        {% for s in states %}
+          <option value="{{ s.code }}">{{ s.code }} ({{ s.count }} sites)</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Agency selector — populated via HTMX on state change -->
+    <div class="form-group">
+      <label for="agency-select" class="form-label">Agency</label>
+      <select id="agency-select" name="org" class="form-control"
+              hx-get="/api/rec-areas"
+              hx-include="[name='state'],[name='org'],[name='q']"
+              hx-target="#rec-area-results"
+              hx-swap="innerHTML"
+              hx-trigger="change"
+              onchange="wizardData.org = this.value;">
+        <option value="">All agencies</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Park / rec area search -->
+  <div class="form-group">
+    <label for="park-search" class="form-label">Search parks</label>
+    <input type="text" id="park-search" name="q" class="form-control"
+           placeholder="Type to search parks…"
+           hx-get="/api/rec-areas"
+           hx-include="[name='state'],[name='org'],[name='q']"
+           hx-target="#rec-area-results"
+           hx-swap="innerHTML"
+           hx-trigger="keyup changed delay:300ms">
+  </div>
+
+  <!-- Rec area results list -->
+  <div class="form-group">
+    <ul id="rec-area-results" class="rec-area-list">
+      <!-- Populated by HTMX -->
+    </ul>
+  </div>
+
+  <!-- Selected rec area display -->
+  <div class="selected-rec-area-container" style="display:none;">
+    <div class="selected-label">Selected park:</div>
+    <div id="selected-rec-area" class="selected-value"></div>
+  </div>
+
+  <!-- Navigation -->
+  <div class="wizard-nav">
+    <a href="/dashboard" class="btn btn-outline">Cancel</a>
+    <button id="step1-next-btn" class="btn btn-primary" disabled
+            onclick="goToStep2()">Next &rarr;</button>
+  </div>
+</div>

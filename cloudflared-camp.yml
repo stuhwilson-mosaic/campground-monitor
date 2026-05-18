@@ -1,0 +1,8 @@
+# Update tunnel ID after running: cloudflared tunnel create campground-monitor
+tunnel: 73719a15-2b81-4764-998f-13d914e691a6
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: camp.stuhwilson.com
+    service: http://app:8000
+  - service: http_status:404

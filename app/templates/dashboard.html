@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Campground Monitor{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Monitors</h1>
+  <a href="/monitors/new" class="btn btn-primary">+ New Monitor</a>
+</div>
+
+<div class="summary-bar">
+  <div class="summary-card">
+    <div class="summary-value val-running">{{ running_count }}</div>
+    <div class="summary-label">Running</div>
+  </div>
+  <div class="summary-card">
+    <div class="summary-value val-paused">{{ paused_count }}</div>
+    <div class="summary-label">Paused</div>
+  </div>
+  <div class="summary-card">
+    <div class="summary-value val-total">{{ monitors | length }}</div>
+    <div class="summary-label">Total</div>
+  </div>
+</div>
+
+{% if monitors %}
+<div class="monitor-grid">
+  {% for m in monitors %}
+    {% include "partials/monitor_card.html" %}
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-state-icon">&#9978;</div>
+  <p>No monitors yet. Create one to start watching for campsites.</p>
+  <a href="/monitors/new" class="btn btn-primary">+ Create your first monitor</a>
+  <p class="mt-3"><a href="/guide" style="font-size: .85rem;">Read the guide</a> to learn how it works.</p>
+</div>
+{% endif %}
+{% endblock %}

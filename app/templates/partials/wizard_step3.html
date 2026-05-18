@@ -1,0 +1,137 @@
+<div class="wizard-step-content" id="step3-content">
+  <h2 class="step-title">Step 3: Dates &amp; Schedule</h2>
+
+  <!-- Monitor name -->
+  <div class="form-group">
+    <label for="monitor-name" class="form-label">Monitor name</label>
+    <input type="text" id="monitor-name" class="form-control"
+           placeholder="e.g. Yosemite June Trip"
+           oninput="wizardData.name = this.value; updateStep3Next();">
+  </div>
+
+  <!-- Campground dates (check-in / check-out) -->
+  <div id="campground-dates">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="check-in-date" class="form-label">Check-in date</label>
+        <input type="date" id="check-in-date" class="form-control"
+               oninput="wizardData.check_in = this.value; updateStep3Next();">
+      </div>
+      <div class="form-group">
+        <label for="check-out-date" class="form-label">Check-out date</label>
+        <input type="date" id="check-out-date" class="form-control"
+               oninput="wizardData.check_out = this.value; updateStep3Next();">
+      </div>
+    </div>
+  </div>
+
+  <!-- Permit dates (entry date + party size) -->
+  <div id="permit-dates" style="display:none;">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="entry-date" class="form-label">Entry date</label>
+        <input type="date" id="entry-date" class="form-control"
+               oninput="wizardData.entry_date = this.value; updateStep3Next();">
+      </div>
+      <div class="form-group">
+        <label for="party-size" class="form-label">Party size</label>
+        <input type="number" id="party-size" class="form-control"
+               min="1" max="25" value="1"
+               oninput="wizardData.party_size = parseInt(this.value, 10) || 1; updateStep3Next();">
+      </div>
+    </div>
+  </div>
+
+  <!-- Poll interval (values in seconds) -->
+  <div class="form-group">
+    <label for="poll-interval" class="form-label">Check every</label>
+    <select id="poll-interval" class="form-control"
+            onchange="wizardData.poll_interval_seconds = parseInt(this.value, 10);">
+      <option value="15">15 seconds</option>
+      <option value="30">30 seconds</option>
+      <option value="60">1 minute</option>
+      <option value="120">2 minutes</option>
+      <option value="300" selected>5 minutes</option>
+      <option value="600">10 minutes</option>
+      <option value="900">15 minutes</option>
+      <option value="1800">30 minutes</option>
+    </select>
+  </div>
+
+  <!-- Navigation -->
+  <div class="wizard-nav">
+    <button class="btn btn-outline" onclick="goToStep2()">&larr; Back</button>
+    <button id="step3-next-btn" class="btn btn-primary" disabled
+            onclick="goToStep4()">Next &rarr;</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Detect permit mode based on selected facility types
+  var isPermit = Object.values(wizardData.facility_types || {}).some(function(t) { return t === "Permit"; });
+  wizardData._isPermit = isPermit;
+
+  // Show/hide the appropriate date section
+  var campDates = document.getElementById("campground-dates");
+  var permitDates = document.getElementById("permit-dates");
+  if (campDates) campDates.style.display = isPermit ? "none" : "";
+  if (permitDates) permitDates.style.display = isPermit ? "" : "none";
+
+  // Restore values if navigating back to this step
+  var nameEl = document.getElementById("monitor-name");
+  var ciEl   = document.getElementById("check-in-date");
+  var coEl   = document.getElementById("check-out-date");
+  var edEl   = document.getElementById("entry-date");
+  var psEl   = document.getElementById("party-size");
+  var ivEl   = document.getElementById("poll-interval");
+  if (nameEl && wizardData.name)       nameEl.value = wizardData.name;
+  if (ciEl   && wizardData.check_in)   ciEl.value   = wizardData.check_in;
+  if (coEl   && wizardData.check_out)  coEl.value   = wizardData.check_out;
+  if (edEl   && wizardData.entry_date) edEl.value   = wizardData.entry_date;
+  if (psEl   && wizardData.party_size) psEl.value   = String(wizardData.party_size);
+  if (ivEl   && wizardData.poll_interval_seconds) ivEl.value = String(wizardData.poll_interval_seconds);
+  updateStep3Next();
+})();
+
+function updateStep3Next() {
+  var ok;
+  if (wizardData._isPermit) {
+    ok = wizardData.name && wizardData.name.trim()
+      && wizardData.entry_date;
+  } else {
+    ok = wizardData.name && wizardData.name.trim()
+      && wizardData.check_in
+      && wizardData.check_out
+      && wizardData.check_out > wizardData.check_in;
+  }
+  var btn = document.getElementById("step3-next-btn");
+  if (btn) btn.disabled = !ok;
+}
+
+function goToStep4() {
+  if (!wizardData.name || !wizardData.name.trim()) {
+    alert("Please enter a monitor name.");
+    return;
+  }
+  if (wizardData._isPermit) {
+    if (!wizardData.entry_date) {
+      alert("Please select an entry date.");
+      return;
+    }
+  } else {
+    if (!wizardData.check_in || !wizardData.check_out) {
+      alert("Please select check-in and check-out dates.");
+      return;
+    }
+    if (wizardData.check_out <= wizardData.check_in) {
+      alert("Check-out must be after check-in.");
+      return;
+    }
+  }
+  setStep(4);
+  htmx.ajax("GET", "/monitors/new/step4",
+    { target: "#wizard-content", swap: "innerHTML" }
+  );
+}
+</script>
