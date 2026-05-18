@@ -43,7 +43,17 @@ class UserStore:
         os.makedirs(data_dir, exist_ok=True)
         if not os.path.exists(self._path):
             self._write({"users": []})
-        # Bootstrap + migration happen here (Tasks 4 and 8 wire them in).
+        self._maybe_bootstrap_admin(bootstrap_username, bootstrap_password)
+
+    def _maybe_bootstrap_admin(
+        self, username: str | None, password: str | None
+    ) -> None:
+        """If the store has zero users and bootstrap creds are supplied, seed admin."""
+        if not username or not password:
+            return
+        if self.list_users():
+            return
+        self.add(username=username, password=password, role="admin")
 
     # ── I/O ───────────────────────────────────────────────────────────────────
 
