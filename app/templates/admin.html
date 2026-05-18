@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Admin — Campground Monitor{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Users</h1>
+</div>
+
+<table class="data-table">
+  <thead>
+    <tr><th>Username</th><th>Role</th><th>Monitors</th><th>Created</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td>{{ u.username }}</td>
+      <td>{{ u.role }}</td>
+      <td>{{ u.monitor_count }}</td>
+      <td>{{ u.created_at[:10] }}</td>
+      <td class="actions-cell">
+        <form method="post" action="/admin/users/{{ u.username }}/password" style="display:inline;">
+          <input type="password" name="new_password" placeholder="New password" required>
+          <button class="btn btn-sm">Reset</button>
+        </form>
+        <form method="post" action="/admin/users/{{ u.username }}/role" style="display:inline;">
+          <select name="role">
+            <option value="user" {% if u.role == 'user' %}selected{% endif %}>user</option>
+            <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+          </select>
+          <button class="btn btn-sm">Set role</button>
+        </form>
+        <form method="post" action="/admin/users/{{ u.username }}/delete" style="display:inline;"
+              onsubmit="return confirm('Delete user {{ u.username }} and reassign or delete their monitors?');">
+          <select name="monitors">
+            <option value="reassign">Reassign monitors to me</option>
+            <option value="delete">Delete monitors too</option>
+          </select>
+          <button class="btn btn-sm btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2 class="page-section">Add user</h2>
+<form method="post" action="/admin/users" class="form-row">
+  <input name="username" placeholder="username" required>
+  <input type="password" name="password" placeholder="password" required>
+  <select name="role">
+    <option value="user">user</option>
+    <option value="admin">admin</option>
+  </select>
+  <button class="btn btn-primary">Create</button>
+</form>
+{% endblock %}
