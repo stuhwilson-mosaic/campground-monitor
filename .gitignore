@@ -9,3 +9,9 @@ __pycache__/
 .playwright-mcp/
 .session_cookies.json
 RIDBFullExport_V1_CSV/
+
+# Local-only — kept out of the shared repo (development docs, AI instructions, tests)
+CLAUDE.md
+pytest.ini
+docs/
+tests/
