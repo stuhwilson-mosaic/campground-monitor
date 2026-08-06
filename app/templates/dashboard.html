@@ -85,6 +85,52 @@
 {% endif %}
 
 <script>
+// ── Remember which cards are expanded ────────────────────────────────────────
+//
+// Start/Stop replaces the whole card via hx-swap="outerHTML", so a freshly
+// rendered card always arrives collapsed. Without this, expanding a card and
+// pressing Stop would slam it shut and lose your place. Kept in localStorage
+// so it also survives a reload.
+var EXPANDED_KEY = "cm.expandedCards";
+
+function loadExpanded() {
+  try { return new Set(JSON.parse(localStorage.getItem(EXPANDED_KEY)) || []); }
+  catch (e) { return new Set(); }
+}
+
+function saveExpanded(set) {
+  try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...set])); }
+  catch (e) { /* private mode, quota — not worth breaking the page over */ }
+}
+
+function restoreExpandedCards(root) {
+  var expanded = loadExpanded();
+  (root || document).querySelectorAll(".card-body[data-monitor-id]")
+    .forEach(function (d) {
+      if (expanded.has(d.dataset.monitorId)) d.open = true;
+    });
+}
+
+// `toggle` does not bubble, so listen in the capture phase to catch every card
+// including ones swapped in later.
+document.addEventListener("toggle", function (evt) {
+  var d = evt.target;
+  if (!d.classList || !d.classList.contains("card-body")) return;
+  var expanded = loadExpanded();
+  if (d.open) expanded.add(d.dataset.monitorId);
+  else expanded.delete(d.dataset.monitorId);
+  saveExpanded(expanded);
+}, true);
+
+document.addEventListener("htmx:afterSwap", function (evt) {
+  if (evt.target && evt.target.classList
+      && evt.target.classList.contains("monitor-card")) {
+    restoreExpandedCards(evt.target.parentElement || document);
+  }
+});
+
+restoreExpandedCards();
+
 // Lifted out of an inline onclick on the card so the card partial stays
 // readable. Lives on the dashboard rather than in the partial, because HTMX
 // swaps the card back into this page and would otherwise re-declare it.

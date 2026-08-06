@@ -1492,3 +1492,77 @@ details[open] > .log-summary::before { content: "\25BE"; }
 /* The reference block must not read as a form. */
 .edit-reference { background: var(--sand-100, #F5F3ED); }
 .edit-reference dd { margin-bottom: .5rem; }
+
+/* ── Collapsible card body ────────────────────────────────────────────────── */
+/* Collapsed, a card shows only what you scan for: name, status, park and
+   trailheads. Dates, stats and actions expand on demand. */
+.card-body { margin-top: .25rem; }
+.card-body-toggle {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    /* Full-width hit area, not just the chevron: the whole strip is the
+       control, which matters most on touch. */
+    min-height: 28px;
+    padding: .15rem 0;
+    border-top: 1px dashed var(--border-light, #E5EAE6);
+}
+.card-body-toggle::-webkit-details-marker { display: none; }
+.card-body-toggle:hover { border-top-color: var(--pine-300, #7DC4A0); }
+.card-body-chevron {
+    color: var(--text-400, #7E928A);
+    font-size: .9rem;
+    line-height: 1;
+    transition: transform .15s ease;
+}
+.card-body[open] > .card-body-toggle > .card-body-chevron { transform: rotate(180deg); }
+.card-body[open] > .card-body-toggle { border-top-style: solid; }
+
+/* ── Status pill doubling as the start/stop control ───────────────────────── */
+.status-toggle {
+    border: 1px solid transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    /* Reserve the wider of the two labels so the pill does not resize on
+       hover, which would shift the header. */
+    display: inline-grid;
+    place-items: center;
+    min-height: 28px;
+}
+.status-toggle > .status-word,
+.status-toggle > .status-verb {
+    grid-area: 1 / 1;          /* stacked, so width is the wider of the two */
+    transition: opacity .12s ease;
+}
+.status-toggle > .status-verb { opacity: 0; }
+.status-toggle:hover > .status-word,
+.status-toggle:focus-visible > .status-word { opacity: 0; }
+.status-toggle:hover > .status-verb,
+.status-toggle:focus-visible > .status-verb { opacity: 1; }
+
+/* Hovering a RUNNING pill offers to stop it, so warn in clay rather than
+   green; hovering a stopped one offers to start, so go green. */
+.status-toggle.running:hover,
+.status-toggle.running:focus-visible {
+    background: var(--clay-100, #FDE8E8);
+    border-color: var(--clay-500, #C53030);
+    color: var(--clay-600, #9B2C2C);
+}
+.status-toggle.stopped:hover,
+.status-toggle.stopped:focus-visible {
+    background: var(--pine-100, #DDF1E6);
+    border-color: var(--pine-500, #34855F);
+    color: var(--pine-700, #1F4D3A);
+}
+.status-toggle:focus-visible { outline: 2px solid var(--pine-500, #34855F); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+    /* Touch target: it is now a control, not a label. */
+    .status-toggle { min-height: 36px; padding-left: .7rem; padding-right: .7rem; }
+}

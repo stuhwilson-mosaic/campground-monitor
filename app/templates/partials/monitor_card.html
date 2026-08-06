@@ -11,7 +11,20 @@
         <div class="monitor-card-meta" style="margin-bottom:.25rem">{{ m.rec_area_name }}</div>
       {% endif %}
     </div>
-    <span class="status-badge {{ status }}">{{ status }}</span>
+    {# The status pill is also the start/stop control. It keeps the primary
+       action visible while the card body is collapsed, and removes a button.
+       Hovering swaps the label to the action so it does not read as a passive
+       badge; the aria-label always states the action for screen readers. #}
+    {% set will_do = "Stop" if status == "running" else "Start" %}
+    <button class="status-badge status-toggle {{ status }}"
+            hx-post="/api/monitors/{{ m.id }}/{{ 'stop' if status == 'running' else 'start' }}"
+            hx-target="#monitor-{{ m.id }}"
+            hx-swap="outerHTML"
+            title="{{ will_do }} this monitor"
+            aria-label="{{ will_do }} monitor {{ m.name | default('') }} (currently {{ status }})">
+      <span class="status-word">{{ status }}</span>
+      <span class="status-verb" aria-hidden="true">{{ will_do }}</span>
+    </button>
   </div>
 
   <div class="monitor-card-meta mb-2">
@@ -33,6 +46,15 @@
       <span class="status-badge stopped">{{ m.facility_name }}</span>
     {% endif %}
   </div>
+
+  {# Split point: name, park, facility and trailheads stay visible so the list
+     can be scanned; dates, stats and actions collapse. The open/closed state is
+     remembered per monitor in dashboard.html, because HTMX replaces this whole
+     card after Start/Stop and would otherwise snap it shut mid-interaction. #}
+  <details class="card-body" data-monitor-id="{{ m.id }}">
+    <summary class="card-body-toggle" aria-label="Show details">
+      <span class="card-body-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
 
   <div class="monitor-card-meta">
     {% if m.entry_date %}
@@ -70,19 +92,9 @@
      <details> rather than a JS dropdown: no click-outside handling, no z-index
      bugs, keyboard accessible for free. The card is re-rendered by HTMX after
      start/stop, so the menu closing on those is expected. #}
+  {# No Start/Stop button here: the status pill in the header does that, which
+     also keeps it reachable while this section is collapsed. #}
   <div class="monitor-card-actions mt-2">
-    {% if status == "running" %}
-      <button class="btn btn-sm btn-outline-primary"
-              hx-post="/api/monitors/{{ m.id }}/stop"
-              hx-target="#monitor-{{ m.id }}"
-              hx-swap="outerHTML">Stop</button>
-    {% else %}
-      <button class="btn btn-sm btn-primary"
-              hx-post="/api/monitors/{{ m.id }}/start"
-              hx-target="#monitor-{{ m.id }}"
-              hx-swap="outerHTML">Start</button>
-    {% endif %}
-
     <details class="card-menu">
       <summary class="btn btn-sm btn-outline-secondary card-menu-toggle"
                title="More actions" aria-label="More actions">&#8943;</summary>
@@ -106,4 +118,5 @@
       </div>
     </details>
   </div>
+  </details>
 </div>
