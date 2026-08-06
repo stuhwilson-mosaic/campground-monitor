@@ -38,6 +38,9 @@
             hx-trigger="click">Permits</button>
   </div>
 
+  <!-- Explains why other-type facilities are greyed out; shown by applyTypeLock() -->
+  <p id="facility-type-hint" class="form-hint" style="display:none;"></p>
+
   <!-- Facility list — loaded immediately on step render -->
   <div id="facility-list"
        hx-get="/api/facilities?rec_area={{ rec_area_id }}"
@@ -50,6 +53,12 @@
   <!-- Selected count -->
   <div class="selected-count">
     <span id="selected-facility-count">0 selected</span>
+    <button type="button" id="save-favorite-btn" class="btn btn-sm btn-outline"
+            onclick="saveSelectionAsFavorite()"
+            title="Save this selection to start monitors from it later">
+      Save as favorite
+    </button>
+    <span id="save-favorite-msg" class="form-hint"></span>
   </div>
 
   <!-- Navigation -->

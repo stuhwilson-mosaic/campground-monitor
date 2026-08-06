@@ -7,6 +7,7 @@ without winsound and without reading module-level globals.
 import calendar
 import logging
 import smtplib
+import time
 from datetime import date, timedelta
 from email.mime.text import MIMEText
 
@@ -71,7 +72,40 @@ def _months_needed(check_in: str, check_out: str) -> list[str]:
     return months
 
 
-def check_campground(facility_id: str, check_in: str, check_out: str) -> list[dict]:
+def _request(url: str, params: dict, meta: list | None = None, timeout: int = 30):
+    """GET with the standard headers, optionally recording request metadata.
+
+    When `meta` is a list, one record is appended per call: url, params, status,
+    duration, response size, and any error. It is a LIST rather than a dict
+    because one logical check can make several HTTP calls (a cross-month stay
+    fetches two months; a permit check may also fetch division metadata).
+
+    Callers that pass nothing, notably monitor.py, are unaffected.
+    """
+    started = time.monotonic()
+    record: dict = {"url": url, "params": dict(params or {})}
+    try:
+        resp = requests.get(url, headers=RECGOV_HEADERS, params=params, timeout=timeout)
+        record["http_status"] = resp.status_code
+        record["response_bytes"] = len(resp.content)
+        resp.raise_for_status()
+        return resp
+    except Exception as exc:
+        record["error"] = str(exc)
+        # A non-2xx still has a body, and that body is the diagnostic.
+        body = getattr(getattr(exc, "response", None), "content", None)
+        if body is not None:
+            record["body"] = body
+        raise
+    finally:
+        record["duration_ms"] = int((time.monotonic() - started) * 1000)
+        if meta is not None:
+            meta.append(record)
+
+
+def check_campground(
+    facility_id: str, check_in: str, check_out: str, meta: list | None = None
+) -> list[dict]:
     """Check a campground for sites available for all nights of the stay.
 
     Makes one API call per calendar month spanned by the stay. Cross-month stays
@@ -85,8 +119,21 @@ def check_campground(facility_id: str, check_in: str, check_out: str) -> list[di
     Returns:
         List of dicts for each fully-available site:
         [{"site_id", "site", "loop", "type", "max_people"}, ...]
+
+    Raises:
+        ValueError: if the stay covers no nights (check_out <= check_in).
     """
     needed = dates_needed(check_in, check_out)
+    if not needed:
+        # Without this guard the availability test below is
+        # `all(<empty generator>)`, which is True, so EVERY site would be
+        # reported available and the monitor would alert on the whole
+        # campground. The API layer rejects this too, but monitor.py calls
+        # straight into here with unvalidated module constants.
+        raise ValueError(
+            f"check_out ({check_out}) must be after check_in ({check_in}); "
+            "the stay covers no nights"
+        )
     months = _months_needed(check_in, check_out)
     url = f"{RECGOV_BASE_URL}/{facility_id}/month"
 
@@ -96,13 +143,7 @@ def check_campground(facility_id: str, check_in: str, check_out: str) -> list[di
     site_meta: dict[str, dict] = {}
 
     for month_start in months:
-        resp = requests.get(
-            url,
-            headers=RECGOV_HEADERS,
-            params={"start_date": month_start},
-            timeout=30,
-        )
-        resp.raise_for_status()
+        resp = _request(url, {"start_date": month_start}, meta=meta)
         data = resp.json()
 
         for site_id, site_info in data.get("campsites", {}).items():
@@ -162,6 +203,7 @@ def check_permit(
     entry_date: str,
     party_size: int = 1,
     division_ids: list[str] | None = None,
+    meta: list | None = None,
 ) -> list[dict]:
     """Check a wilderness permit facility for available divisions on a given date.
 
@@ -185,15 +227,14 @@ def check_permit(
     last_of_month = date(target.year, target.month, last_day)
 
     url = f"https://www.recreation.gov/api/permitinyo/{facility_id}/availabilityv2"
-    resp = requests.get(
+    resp = _request(
         url,
-        headers=RECGOV_HEADERS,
-        params={
+        {
             "start_date": first_of_month.isoformat(),
             "end_date": last_of_month.isoformat(),
             "commercial_acct": "false",
         },
-        timeout=30,
+        meta=meta,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -267,6 +308,9 @@ def send_ntfy(
         return False
 
 
+SMTP_TIMEOUT_SECONDS = 20
+
+
 def send_email(to: str, subject: str, body: str, smtp_config: dict) -> bool:
     """Send a notification email via SMTP with STARTTLS.
 
@@ -287,7 +331,13 @@ def send_email(to: str, subject: str, body: str, smtp_config: dict) -> bool:
     msg["To"] = to
 
     try:
-        with smtplib.SMTP(smtp_config["server"], smtp_config["port"]) as server:
+        # An explicit timeout is essential: smtplib defaults to
+        # socket._GLOBAL_DEFAULT_TIMEOUT (block forever), and nothing here calls
+        # socket.setdefaulttimeout. A hung SMTP host would otherwise stall the
+        # caller indefinitely.
+        with smtplib.SMTP(
+            smtp_config["server"], smtp_config["port"], timeout=SMTP_TIMEOUT_SECONDS
+        ) as server:
             server.starttls()
             server.login(from_addr, smtp_config["password"])
             server.sendmail(from_addr, [to], msg.as_string())

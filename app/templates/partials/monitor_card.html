@@ -26,7 +26,7 @@
 
   <div class="monitor-card-meta">
     {% if m.entry_date %}
-      <span>Entry: {{ m.entry_date }} &middot; party: {{ m.party_size | default(1) }}</span>
+      <span>Entry: {{ m.entry_date }} &middot; party: {{ m.party_size | default(1) }}{% if m.nights %} &middot; {{ m.nights }} night{{ 's' if m.nights != 1 else '' }}{% endif %}</span>
     {% else %}
       <span>{{ m.check_in }} &rarr; {{ m.check_out }}</span>
     {% endif %}
@@ -81,6 +81,14 @@
               hx-target="#monitor-{{ m.id }}"
               hx-swap="outerHTML">Start</button>
     {% endif %}
+    {% if m.status == "running" %}
+    <button class="btn btn-sm btn-outline-secondary" disabled
+            title="Stop the monitor first to edit its dates">Edit</button>
+    {% else %}
+    <a href="/monitors/{{ m.id }}/edit" class="btn btn-sm btn-outline-secondary">Edit</a>
+    {% endif %}
+    <a href="/monitors/new?from={{ m.id }}" class="btn btn-sm btn-outline-secondary"
+       title="Start a new monitor from this one's facilities and dates">Clone</a>
     <a href="/logs/{{ m.id }}" class="btn btn-sm btn-outline-secondary">Logs</a>
     <button class="btn btn-sm btn-outline-secondary"
             hx-post="/api/monitors/{{ m.id }}/test-alert"

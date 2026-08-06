@@ -39,7 +39,18 @@
                min="1" max="25" value="1"
                oninput="wizardData.party_size = parseInt(this.value, 10) || 1; updateStep3Next();">
       </div>
+      <div class="form-group">
+        <label for="nights" class="form-label">Nights <span class="form-optional">(optional)</span></label>
+        <input type="number" id="nights" class="form-control"
+               min="1" max="30" placeholder="e.g. 3"
+               oninput="wizardData.nights = parseInt(this.value, 10) || null;">
+      </div>
     </div>
+    <p class="form-hint">
+      Wilderness quota applies to your entry trailhead on the entry date only,
+      so nights doesn't change what's available. It's recorded so you know what
+      to book.
+    </p>
   </div>
 
   <!-- Poll interval (values in seconds) -->
@@ -47,14 +58,15 @@
     <label for="poll-interval" class="form-label">Check every</label>
     <select id="poll-interval" class="form-control"
             onchange="wizardData.poll_interval_seconds = parseInt(this.value, 10);">
-      <option value="15">15 seconds</option>
-      <option value="30">30 seconds</option>
-      <option value="60">1 minute</option>
-      <option value="120">2 minutes</option>
-      <option value="300" selected>5 minutes</option>
-      <option value="600">10 minutes</option>
-      <option value="900">15 minutes</option>
-      <option value="1800">30 minutes</option>
+      {% set dpi = default_poll_interval | default(300) %}
+      <option value="15"{% if dpi == 15 %} selected{% endif %}>15 seconds</option>
+      <option value="30"{% if dpi == 30 %} selected{% endif %}>30 seconds</option>
+      <option value="60"{% if dpi == 60 %} selected{% endif %}>1 minute</option>
+      <option value="120"{% if dpi == 120 %} selected{% endif %}>2 minutes</option>
+      <option value="300"{% if dpi == 300 %} selected{% endif %}>5 minutes</option>
+      <option value="600"{% if dpi == 600 %} selected{% endif %}>10 minutes</option>
+      <option value="900"{% if dpi == 900 %} selected{% endif %}>15 minutes</option>
+      <option value="1800"{% if dpi == 1800 %} selected{% endif %}>30 minutes</option>
     </select>
   </div>
 
@@ -68,8 +80,13 @@
 
 <script>
 (function() {
-  // Detect permit mode based on selected facility types
-  var isPermit = Object.values(wizardData.facility_types || {}).some(function(t) { return t === "Permit"; });
+  // Every facility in a monitor shares one type (enforced in step 2 and again
+  // server-side), so read it rather than guessing. This used to be .some(),
+  // which flipped the whole monitor to permit mode if ANY selected facility was
+  // a permit, leaving the campground facilities with empty dates.
+  var ids = wizardData.facility_ids || [];
+  var isPermit = ids.length > 0
+    && (wizardData.facility_types || {})[ids[0]] === "Permit";
   wizardData._isPermit = isPermit;
 
   // Show/hide the appropriate date section
@@ -84,13 +101,22 @@
   var coEl   = document.getElementById("check-out-date");
   var edEl   = document.getElementById("entry-date");
   var psEl   = document.getElementById("party-size");
+  var ngEl   = document.getElementById("nights");
   var ivEl   = document.getElementById("poll-interval");
   if (nameEl && wizardData.name)       nameEl.value = wizardData.name;
   if (ciEl   && wizardData.check_in)   ciEl.value   = wizardData.check_in;
   if (coEl   && wizardData.check_out)  coEl.value   = wizardData.check_out;
   if (edEl   && wizardData.entry_date) edEl.value   = wizardData.entry_date;
   if (psEl   && wizardData.party_size) psEl.value   = String(wizardData.party_size);
-  if (ivEl   && wizardData.poll_interval_seconds) ivEl.value = String(wizardData.poll_interval_seconds);
+  if (ngEl   && wizardData.nights)     ngEl.value   = String(wizardData.nights);
+  // Same precedence rule as step 4: an in-progress value wins over the stored
+  // default, but wizardData must adopt the default when nothing is set, since
+  // the submitted payload is built from wizardData rather than the DOM.
+  if (ivEl && wizardData.poll_interval_seconds) {
+    ivEl.value = String(wizardData.poll_interval_seconds);
+  } else if (ivEl && ivEl.value) {
+    wizardData.poll_interval_seconds = parseInt(ivEl.value, 10);
+  }
   updateStep3Next();
 })();
 

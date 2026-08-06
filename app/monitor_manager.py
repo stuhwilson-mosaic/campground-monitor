@@ -51,7 +51,11 @@ def _trip_window_expired(config: dict, now: datetime | None = None) -> bool:
 class MonitorManager:
     """Manage campground monitors: persistence + async task lifecycle."""
 
-    def __init__(self, data_dir: str) -> None:
+    def __init__(self, data_dir: str, telemetry=None) -> None:
+        # Optional so tests and the CLI can build a manager without a database.
+        # When present, check rows are persisted there instead of the in-memory
+        # ring buffer, which was capped at 20 entries and lost on every restart.
+        self.telemetry = telemetry
         self._data_dir = data_dir
         self._path = os.path.join(data_dir, "monitors.json")
         self._tasks: dict[str, asyncio.Task] = {}
@@ -62,6 +66,9 @@ class MonitorManager:
         self._start_times: dict[str, float] = {}
         # Re-alert after this many seconds even if site is still available
         self.notify_cooldown_seconds = 15 * 60  # 15 minutes
+        # How often a paused loop wakes to re-check the pause flag. This is the
+        # upper bound on how long Resume takes to visibly take effect.
+        self.pause_poll_seconds = 5
         # Per-monitor check log: monitor_id -> deque of log entries (newest first)
         self._check_logs: dict[str, deque[dict]] = {}
         self._max_log_entries = 20
@@ -155,7 +162,26 @@ class MonitorManager:
         if len(data["monitors"]) == before:
             return False
         self._write(data)
+        # Drop in-memory state too. Without this the dedup ledger and check-log
+        # ring buffer for a deleted monitor lived until the process restarted.
+        self._forget_runtime_state(monitor_id)
         return True
+
+    def clear_notified(self, monitor_id: str) -> None:
+        """Forget which sites this monitor has already alerted on.
+
+        Required whenever the monitor's dates change: the ledger is keyed only
+        by (facility_id, site_id), so an entry recorded for the OLD dates would
+        suppress the first alert under the new ones for the cooldown window.
+        Note nothing clears this on stop, so it survives a stop/start cycle.
+        """
+        self._notified.pop(monitor_id, None)
+
+    def _forget_runtime_state(self, monitor_id: str) -> None:
+        self._notified.pop(monitor_id, None)
+        self._check_logs.pop(monitor_id, None)
+        self._start_times.pop(monitor_id, None)
+        self._paused.discard(monitor_id)
 
     # ── Async Task Lifecycle ──────────────────────────────────────────────────
 
@@ -165,20 +191,32 @@ class MonitorManager:
         Creates an asyncio.Task for the poll loop and updates status to "running".
         No-ops if already running.
         """
-        if monitor_id in self._tasks and not self._tasks[monitor_id].done():
-            return  # Already running
-
-        self._paused.discard(monitor_id)
-        self._start_times[monitor_id] = time.time()
-
-        # Update status and stats
         monitor = self.get_monitor(monitor_id)
         if monitor is None:
             log.error("start_monitor: monitor %s not found", monitor_id)
             return
+
+        # Clearing the pause flag and restoring status MUST happen before the
+        # "already running" early return. pause_monitor leaves the task alive in
+        # _tasks, so a paused monitor always takes that early return: doing the
+        # discard afterwards made Resume a no-op, and the only ways out were
+        # Stop-then-Start or a container restart (which drops the in-memory set).
+        self._paused.discard(monitor_id)
+
+        already_running = (
+            monitor_id in self._tasks and not self._tasks[monitor_id].done()
+        )
+
         stats = monitor.get("stats", {})
-        stats["last_started_at"] = datetime.now(timezone.utc).isoformat()
+        if not already_running:
+            # Only a genuinely new run restarts the clock; a resume continues
+            # the existing one.
+            self._start_times[monitor_id] = time.time()
+            stats["last_started_at"] = datetime.now(timezone.utc).isoformat()
         self.update_monitor(monitor_id, status="running", stats=stats)
+
+        if already_running:
+            return  # Task is alive and now unpaused; nothing more to do.
 
         task = asyncio.create_task(
             self._poll_loop(monitor_id),
@@ -236,9 +274,82 @@ class MonitorManager:
 
     # ── Check Logs ─────────────────────────────────────────────────────────────
 
-    def get_check_logs(self, monitor_id: str) -> list[dict]:
-        """Return the last N check log entries for a monitor (newest first)."""
+    def get_check_logs(
+        self, monitor_id: str, *, limit: int = 100, offset: int = 0,
+        errors_only: bool = False,
+    ) -> list[dict]:
+        """Return check history for a monitor, newest first.
+
+        Served from SQLite when telemetry is configured, so history survives a
+        restart. Falls back to the in-memory ring buffer otherwise (tests, and
+        the CLI, which construct a manager without a database).
+        """
+        if self.telemetry is not None:
+            return self.telemetry.get_checks(
+                monitor_id, limit=limit, offset=offset, errors_only=errors_only
+            )
         return list(self._check_logs.get(monitor_id, []))
+
+    def count_check_logs(self, monitor_id: str, *, errors_only: bool = False) -> int:
+        if self.telemetry is not None:
+            return self.telemetry.count_checks(monitor_id, errors_only=errors_only)
+        return len(self._check_logs.get(monitor_id, []))
+
+    async def _audit_system(
+        self, event: str, monitor_id: str, name: str | None, detail: dict | None = None
+    ) -> None:
+        """Record a system-initiated event (no acting user). Never raises."""
+        if self.telemetry is None:
+            return
+        try:
+            await asyncio.to_thread(
+                self.telemetry.record_event, event=event, username=None,
+                target_id=monitor_id, target_name=name, detail=detail,
+            )
+        except Exception:
+            log.exception("_audit_system: failed to record %s", event)
+
+    async def _record_requests(
+        self, monitor_id: str, facility_id: str, facility_name: str, kind: str,
+        req_meta: list[dict], *, status: str, error: str | None = None,
+        sites_found: int | None = None, new_alerts: int | None = None,
+        alerted: bool | None = None, result: object = None,
+    ) -> None:
+        """Persist one telemetry row per HTTP request made for this facility.
+
+        Wrapped in to_thread because sqlite3 is synchronous: writing inline
+        would block the event loop, which is the same defect the alert path had.
+        Failures here are swallowed on purpose. Telemetry must never be able to
+        take down monitoring.
+        """
+        if self.telemetry is None:
+            return
+        if not req_meta:
+            # The call failed before any request went out, e.g. invalid dates.
+            req_meta = [{"url": "", "params": {}}]
+        try:
+            for rec in req_meta:
+                await asyncio.to_thread(
+                    self.telemetry.record_check,
+                    monitor_id=monitor_id,
+                    facility_id=facility_id,
+                    facility_name=facility_name,
+                    kind=kind,
+                    url=rec.get("url", ""),
+                    params=rec.get("params"),
+                    http_status=rec.get("http_status"),
+                    duration_ms=rec.get("duration_ms"),
+                    response_bytes=rec.get("response_bytes"),
+                    status="error" if (status == "error" or rec.get("error")) else "ok",
+                    error=error or rec.get("error"),
+                    body_excerpt=rec.get("body"),
+                    sites_found=sites_found,
+                    new_alerts=new_alerts,
+                    alerted=alerted,
+                    result=result,
+                )
+        except Exception:
+            log.exception("_record_requests: telemetry write failed for %s", monitor_id)
 
     def _append_log(self, monitor_id: str, entry: dict) -> None:
         """Append a log entry to the monitor's ring buffer."""
@@ -291,15 +402,14 @@ class MonitorManager:
     async def _poll_loop(self, monitor_id: str) -> None:
         """Infinite poll loop for a single monitor."""
         while True:
-            if monitor_id in self._paused:
-                await asyncio.sleep(5)
-                continue
-
             config = self.get_monitor(monitor_id)
             if config is None:
                 log.warning("_poll_loop: monitor %s disappeared, stopping loop", monitor_id)
                 return
 
+            # Expiry is evaluated BEFORE the pause check on purpose. When pause
+            # came first it `continue`d, so a paused monitor whose trip window
+            # had passed never reached this and lingered forever.
             if _trip_window_expired(config):
                 log.info(
                     "_poll_loop: monitor %s trip window ended >%dh ago, auto-stopping",
@@ -307,7 +417,18 @@ class MonitorManager:
                     int(_AUTO_STOP_GRACE.total_seconds() // 3600),
                 )
                 await self.stop_monitor(monitor_id)
+                # username=None marks this as the auto-stop RULE rather than a
+                # person clicking Stop. Answering "who stopped this?" previously
+                # meant correlating container logs against stats timestamps.
+                await self._audit_system(
+                    "monitor.stop", monitor_id, config.get("name"),
+                    {"cause": "trip window expired"},
+                )
                 return
+
+            if monitor_id in self._paused:
+                await asyncio.sleep(self.pause_poll_seconds)
+                continue
 
             await self._run_check(config)
 
@@ -379,16 +500,25 @@ class MonitorManager:
                     "check_out": check_out,
                 }
 
+            # One record per HTTP call: a cross-month stay makes two.
+            req_meta: list[dict] = []
             try:
                 if is_permit:
                     div_ids = facility.get("division_ids") or None
                     sites = await asyncio.to_thread(
                         check_permit, facility_id, entry_date,
-                        party_size=party_size, division_ids=div_ids,
+                        party_size=party_size, division_ids=div_ids, meta=req_meta,
                     )
                 else:
-                    sites = await asyncio.to_thread(check_campground, facility_id, check_in, check_out)
+                    sites = await asyncio.to_thread(
+                        check_campground, facility_id, check_in, check_out, req_meta
+                    )
             except Exception as exc:
+                await self._record_requests(
+                    monitor_id, facility_id, facility_name,
+                    "permit" if is_permit else "campground",
+                    req_meta, status="error", error=str(exc),
+                )
                 log.error("_run_check: %s failed for monitor %s: %s", facility_name, monitor_id, exc)
                 stats["total_errors"] = stats.get("total_errors", 0) + 1
                 log_entry.update({"status": "error", "error": str(exc), "sites_found": 0, "alerted": False})
@@ -406,19 +536,29 @@ class MonitorManager:
                 or (now - self._notified[monitor_id].get((facility_id, s.get("division_id") or s.get("site_id")), 0)) >= self.notify_cooldown_seconds
             ]
 
+            delivered = False
             if new_sites:
                 found_any = True
-                await self._send_alerts(config, facility_id, facility_name, new_sites)
-                for s in new_sites:
-                    site_key = s.get("division_id") or s.get("site_id")
-                    self._notified[monitor_id][(facility_id, site_key)] = now
+                delivered = await self._send_alerts(config, facility_id, facility_name, new_sites)
+                if delivered:
+                    for s in new_sites:
+                        site_key = s.get("division_id") or s.get("site_id")
+                        self._notified[monitor_id][(facility_id, site_key)] = now
+                else:
+                    # Leave the sites unmarked so the next cycle retries rather
+                    # than silently swallowing the alert for the cooldown window.
+                    log.error(
+                        "_run_check: alert delivery failed for monitor %s at %s; "
+                        "will retry next cycle",
+                        monitor_id, facility_name,
+                    )
 
             if is_permit:
                 log_entry.update({
                     "status": "ok",
                     "sites_found": len(sites),
                     "new_alerts": len(new_sites),
-                    "alerted": len(new_sites) > 0,
+                    "alerted": delivered and len(new_sites) > 0,
                     "sites": [
                         {"site": s["division_name"], "remaining": s["remaining"], "total": s["total"]}
                         for s in sites
@@ -429,13 +569,22 @@ class MonitorManager:
                     "status": "ok",
                     "sites_found": len(sites),
                     "new_alerts": len(new_sites),
-                    "alerted": len(new_sites) > 0,
+                    "alerted": delivered and len(new_sites) > 0,
                     "sites": [
                         {"site": s["site"], "loop": s.get("loop", "?"), "type": s.get("type", "?")}
                         for s in sites
                     ],
                 })
             self._append_log(monitor_id, log_entry)
+            await self._record_requests(
+                monitor_id, facility_id, facility_name,
+                "permit" if is_permit else "campground",
+                req_meta, status="ok",
+                sites_found=len(sites),
+                new_alerts=len(new_sites),
+                alerted=bool(delivered and new_sites),
+                result=log_entry.get("sites"),
+            )
 
             if not new_sites and sites:
                 log.info("  %s: %d site(s) still available (already notified)", facility_name, len(sites))
@@ -452,11 +601,18 @@ class MonitorManager:
 
         self.update_monitor(monitor_id, stats=stats)
 
-    async def _send_alerts(self, config: dict, facility_id: str, facility_name: str, sites: list[dict]) -> None:
+    async def _send_alerts(self, config: dict, facility_id: str, facility_name: str, sites: list[dict]) -> bool:
         """Build and dispatch notifications for newly-found available sites.
 
         Sends ntfy and/or email based on config flags.
         Permit and campground sites produce different alert formats.
+
+        Returns:
+            True if at least one channel delivered (or none was configured),
+            False if every configured channel failed. The caller uses this to
+            decide whether to mark the sites notified: recording a failed send
+            as delivered means the 15-minute cooldown suppresses the retry and
+            the alert is lost with no way to notice.
         """
         monitor_id = config["id"]
 
@@ -468,9 +624,13 @@ class MonitorManager:
                 f"  {s['division_name']}: {s['remaining']}/{s['total']} available"
                 for s in sites
             ]
+            # nights is metadata only (the permit API has no duration
+            # dimension), but it is what you need to know to book.
+            nights = config.get("nights")
+            nights_part = f" | Nights: {nights}" if nights else ""
             body = (
                 f"Permit available at {facility_name}!\n"
-                f"Entry date: {entry_date} | Party size: {party_size}\n"
+                f"Entry date: {entry_date} | Party size: {party_size}{nights_part}\n"
                 f"Entry points ({len(sites)}):\n" + "\n".join(lines)
             )
             title = f"Permit Alert: {facility_name}"
@@ -491,10 +651,22 @@ class MonitorManager:
             title = f"Campsite Alert: {facility_name}"
             click_url = f"https://www.recreation.gov/camping/campgrounds/{facility_id}"
 
+        # Both senders are sync network calls, so they go through to_thread like
+        # every other outbound request. Called inline they would block the event
+        # loop, stalling every other monitor and the whole web UI.
+        attempted = False
+        delivered = False
+
         if config.get("enable_ntfy"):
             topic = config.get("ntfy_topic", "")
             if topic:
-                send_ntfy(topic=topic, title=title, body=body, click_url=click_url)
+                attempted = True
+                ok = await asyncio.to_thread(
+                    send_ntfy, topic=topic, title=title, body=body, click_url=click_url
+                )
+                delivered = delivered or bool(ok)
+                if not ok:
+                    log.error("_send_alerts: ntfy delivery failed for monitor %s", monitor_id)
             else:
                 log.warning("_send_alerts: enable_ntfy set but no ntfy_topic for monitor %s", monitor_id)
 
@@ -507,6 +679,17 @@ class MonitorManager:
                     "from_addr": EMAIL_FROM,
                     "password": EMAIL_PASSWORD,
                 }
-                send_email(to=email_to, subject=title, body=body, smtp_config=smtp_config)
+                attempted = True
+                ok = await asyncio.to_thread(
+                    send_email, to=email_to, subject=title, body=body, smtp_config=smtp_config
+                )
+                delivered = delivered or bool(ok)
+                if not ok:
+                    log.error("_send_alerts: email delivery failed for monitor %s", monitor_id)
             else:
                 log.warning("_send_alerts: enable_email set but no email_to for monitor %s", monitor_id)
+
+        # Nothing configured to send through counts as delivered: there is no
+        # failure to retry, and the caller should still dedup so a monitor with
+        # no channels does not spin on the same sites forever.
+        return delivered if attempted else True

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Edit dates</h1>
+  <p class="page-subtitle">{{ monitor.name }}</p>
+</div>
+
+<div class="card">
+  {# Only the dates are editable. Facilities and notification settings are
+     deliberately out of scope: changing those is what Clone is for. #}
+  {% if is_permit %}
+  <div class="form-row">
+    <div class="form-group">
+      <label for="entry-date" class="form-label">Entry date</label>
+      <input type="date" id="entry-date" class="form-control"
+             value="{{ monitor.entry_date }}">
+    </div>
+    <div class="form-group">
+      <label for="nights" class="form-label">Nights <span class="form-optional">(optional)</span></label>
+      <input type="number" id="nights" class="form-control" min="1" max="30"
+             value="{{ monitor.nights if monitor.nights else '' }}">
+    </div>
+  </div>
+  {% else %}
+  <div class="form-row">
+    <div class="form-group">
+      <label for="check-in" class="form-label">Check-in date</label>
+      <input type="date" id="check-in" class="form-control" value="{{ monitor.check_in }}">
+    </div>
+    <div class="form-group">
+      <label for="check-out" class="form-label">Check-out date</label>
+      <input type="date" id="check-out" class="form-control" value="{{ monitor.check_out }}">
+    </div>
+  </div>
+  {% endif %}
+
+  <p id="edit-error" class="form-hint" style="color: var(--danger-600, #b4413a);"></p>
+
+  <div class="wizard-nav">
+    <a href="/dashboard" class="btn btn-outline">Cancel</a>
+    <button id="save-btn" class="btn btn-primary" onclick="saveDates()">Save dates</button>
+  </div>
+</div>
+
+<script>
+var IS_PERMIT = {{ 'true' if is_permit else 'false' }};
+var MONITOR_ID = {{ monitor.id | tojson }};
+
+function saveDates() {
+  var err = document.getElementById("edit-error");
+  var btn = document.getElementById("save-btn");
+  err.textContent = "";
+
+  var payload = IS_PERMIT
+    ? { entry_date: document.getElementById("entry-date").value,
+        nights: parseInt(document.getElementById("nights").value, 10) || null }
+    : { check_in: document.getElementById("check-in").value,
+        check_out: document.getElementById("check-out").value };
+
+  btn.disabled = true;
+  fetch("/api/monitors/" + encodeURIComponent(MONITOR_ID) + "/dates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then(function (r) {
+    if (r.ok) { window.location.href = "/dashboard"; return; }
+    btn.disabled = false;
+    return r.json().then(function (d) {
+      err.textContent = d.error || "Could not save.";
+    }).catch(function () { err.textContent = "Could not save."; });
+  }).catch(function () {
+    btn.disabled = false;
+    err.textContent = "Request failed.";
+  });
+}
+</script>
+{% endblock %}

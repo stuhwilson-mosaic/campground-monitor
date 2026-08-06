@@ -23,6 +23,31 @@
   </div>
 </div>
 
+{# Saved facility selections. Deliberately OUTSIDE the "has monitors" branch:
+   they matter most to someone with an empty dashboard, who can start a monitor
+   from one in a single click. Renders nothing when the list is empty. #}
+{% if favorites %}
+<div class="favorites-strip">
+  <h2 class="favorites-title">Favorites</h2>
+  <div class="favorites-row">
+    {% for f in favorites %}
+    <div class="favorite-chip" id="favorite-{{ f.id }}">
+      <a href="/monitors/new?favorite={{ f.id }}" class="favorite-link"
+         title="Start a new monitor from this selection">
+        <span class="favorite-label">{{ f.label }}</span>
+        <span class="favorite-meta">{{ f.facilities | length }} site{{ '' if f.facilities | length == 1 else 's' }}</span>
+      </a>
+      <button class="favorite-delete" title="Remove favorite"
+              hx-delete="/api/favorites/{{ f.id }}"
+              hx-target="#favorite-{{ f.id }}"
+              hx-swap="outerHTML"
+              hx-confirm="Remove this favorite?">&times;</button>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {% if monitors %}
 <div class="monitor-grid">
   {% for m in monitors %}

@@ -8,3 +8,16 @@ tests/
 docs/
 monitor.py
 *.md
+
+# Bulk data — never COPYed by the Dockerfile, but without these the build
+# context is ~3.9 GB and all of it is shipped to the daemon on every build.
+# RIDB arrives at runtime via a read-only bind mount, not through the image.
+RIDBFullExport_V1_CSV*/
+reservations2024/
+
+# Local dev scratch
+.pytest_cache/
+.playwright-mcp/
+*.png
+permit_*.json
+ridb_swagger.yaml

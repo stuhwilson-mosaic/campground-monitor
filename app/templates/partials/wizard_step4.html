@@ -24,6 +24,7 @@
       {% endif %}
       <input type="text" id="ntfy-topic-input" class="form-control"
              placeholder="e.g. camp-yosemite-2026"
+             value="{{ default_ntfy_topic }}"
              oninput="wizardData.ntfy_topic = this.value; updateShareLink();">
     </div>
 
@@ -52,6 +53,7 @@
       <label for="email-to-input" class="form-label">Email address</label>
       <input type="email" id="email-to-input" class="form-control"
              placeholder="you@example.com"
+             value="{{ default_email }}"
              oninput="wizardData.email_to = this.value;">
     </div>
   </div>
@@ -73,8 +75,21 @@
 
   if (ntfyToggle)  ntfyToggle.checked  = wizardData.enable_ntfy !== false;
   if (emailToggle) emailToggle.checked = !!wizardData.enable_email;
-  if (ntfyInput && wizardData.ntfy_topic) ntfyInput.value = wizardData.ntfy_topic;
-  if (emailInput && wizardData.email_to)  emailInput.value = wizardData.email_to;
+  // Precedence: an in-progress value (back-navigation, or a cloned monitor)
+  // always beats the stored default. Only adopt the server-rendered default
+  // when nothing is set yet.
+  if (ntfyInput && wizardData.ntfy_topic) {
+    ntfyInput.value = wizardData.ntfy_topic;
+  } else if (ntfyInput && ntfyInput.value) {
+    // Rendering value="" is not enough: the payload is built from wizardData,
+    // so without this the prefill would look right and still submit empty.
+    wizardData.ntfy_topic = ntfyInput.value;
+  }
+  if (emailInput && wizardData.email_to) {
+    emailInput.value = wizardData.email_to;
+  } else if (emailInput && emailInput.value) {
+    wizardData.email_to = emailInput.value;
+  }
 
   // Sync state
   wizardData.enable_ntfy  = ntfyToggle  ? ntfyToggle.checked  : true;

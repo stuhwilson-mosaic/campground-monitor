@@ -4,68 +4,87 @@
 <div class="flex-between mb-3">
   <div>
     <h2 class="page-title">{{ monitor.name }}</h2>
-    <span class="text-muted text-small">Last {{ logs | length }} API checks</span>
+    <span class="text-muted text-small">
+      {{ total }} request{{ '' if total == 1 else 's' }} recorded{% if errors_only %} (errors only){% endif %}
+    </span>
   </div>
   <a href="/dashboard" class="btn btn-sm btn-outline-primary">&larr; Dashboard</a>
 </div>
 
+<div class="mb-3">
+  {# One row per HTTP request, not per check: a cross-month stay makes two. #}
+  <a href="/logs/{{ monitor.id }}"
+     class="btn btn-sm {{ 'btn-primary' if not errors_only else 'btn-outline-primary' }}">All</a>
+  <a href="/logs/{{ monitor.id }}?errors=1"
+     class="btn btn-sm {{ 'btn-primary' if errors_only else 'btn-outline-primary' }}">Errors only</a>
+</div>
+
 {% if not logs %}
 <div class="log-empty">
-  <p class="text-muted">No checks recorded yet. Start the monitor and wait for the first poll cycle.</p>
+  <p class="text-muted">
+    {% if errors_only %}No errors recorded.
+    {% else %}No checks recorded yet. Start the monitor and wait for the first poll cycle.{% endif %}
+  </p>
 </div>
 {% else %}
 
 <div class="log-list">
 {% for entry in logs %}
-  <div class="log-entry {% if entry.status == 'error' %}log-error{% elif entry.alerted %}log-alert{% endif %}">
-    <div class="log-header">
-      <span class="log-facility">{{ entry.facility_name }}</span>
-      <span class="log-time">{{ entry.timestamp[:19] }}Z</span>
-    </div>
-    <div class="log-details">
+  <details class="log-entry {% if entry.status == 'error' %}log-error{% elif entry.alerted %}log-alert{% endif %}">
+    <summary class="log-summary">
+      <span class="log-facility">{{ entry.facility_name or entry.facility_id }}</span>
       <span class="log-status-badge {% if entry.status == 'error' %}bad{% elif entry.alerted %}good{% else %}neutral{% endif %}">
         {% if entry.status == 'error' %}ERROR
         {% elif entry.alerted %}ALERTED ({{ entry.new_alerts }} new)
-        {% elif entry.sites_found > 0 %}{{ entry.sites_found }} available (already notified)
-        {% else %}No availability
-        {% endif %}
+        {% elif entry.sites_found %}{{ entry.sites_found }} available (already notified)
+        {% else %}No availability{% endif %}
       </span>
-      {% if entry.entry_date is defined and entry.entry_date %}
-        <span class="text-muted text-small">Entry: {{ entry.entry_date }} &middot; party: {{ entry.party_size | default(1) }}</span>
-      {% else %}
-        <span class="text-muted text-small">{{ entry.check_in }} &rarr; {{ entry.check_out }}</span>
+      <span class="log-meta">
+        {% if entry.http_status %}HTTP {{ entry.http_status }}{% endif %}
+        {% if entry.duration_ms is not none %} &middot; {{ entry.duration_ms }}ms{% endif %}
+        {% if entry.response_bytes %} &middot; {{ (entry.response_bytes / 1024) | round | int }} KB{% endif %}
+      </span>
+      <span class="log-time">{{ entry.ts[:19] }}Z</span>
+    </summary>
+
+    <div class="log-detail-body">
+      <div class="log-kv"><span class="log-k">Request</span>
+        <code class="log-v">{{ entry.url }}</code></div>
+      {% if entry.params and entry.params != '{}' %}
+      <div class="log-kv"><span class="log-k">Params</span>
+        <code class="log-v">{{ entry.params }}</code></div>
+      {% endif %}
+      {% if entry.error %}
+      <div class="log-kv"><span class="log-k">Error</span>
+        <code class="log-v log-v-error">{{ entry.error }}</code></div>
+      {% endif %}
+      {% if entry.body_excerpt %}
+      {# Captured only for errors: a successful body is ~500 KB. #}
+      <div class="log-kv"><span class="log-k">Response</span>
+        <pre class="log-body">{{ entry.body_excerpt }}</pre></div>
+      {% endif %}
+      {% if entry.result and entry.result != 'null' %}
+      <div class="log-kv"><span class="log-k">Found</span>
+        <code class="log-v">{{ entry.result }}</code></div>
       {% endif %}
     </div>
-    {% if entry.status == 'error' %}
-    <div class="log-error-msg">{{ entry.error }}</div>
-    {% endif %}
-    {% if entry.sites is defined and entry.sites %}
-    <details class="log-sites">
-      <summary class="text-small">{{ entry.sites | length }} site(s) found</summary>
-      {% if entry.entry_date is defined and entry.entry_date %}
-      <table class="log-table">
-        <thead><tr><th>Entry Point</th><th>Remaining</th><th>Total</th></tr></thead>
-        <tbody>
-        {% for s in entry.sites %}
-          <tr><td>{{ s.site }}</td><td>{{ s.remaining }}</td><td>{{ s.total }}</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <table class="log-table">
-        <thead><tr><th>Site</th><th>Loop</th><th>Type</th></tr></thead>
-        <tbody>
-        {% for s in entry.sites %}
-          <tr><td>{{ s.site }}</td><td>{{ s.loop }}</td><td>{{ s.type }}</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      {% endif %}
-    </details>
-    {% endif %}
-  </div>
+  </details>
 {% endfor %}
 </div>
+
+{% if page_count > 1 %}
+<div class="flex-between mt-3">
+  {% if page > 1 %}
+  <a class="btn btn-sm btn-outline-primary"
+     href="/logs/{{ monitor.id }}?page={{ page - 1 }}{{ '&errors=1' if errors_only else '' }}">&larr; Newer</a>
+  {% else %}<span></span>{% endif %}
+  <span class="text-muted text-small">Page {{ page }} of {{ page_count }}</span>
+  {% if page < page_count %}
+  <a class="btn btn-sm btn-outline-primary"
+     href="/logs/{{ monitor.id }}?page={{ page + 1 }}{{ '&errors=1' if errors_only else '' }}">Older &rarr;</a>
+  {% else %}<span></span>{% endif %}
+</div>
+{% endif %}
 
 {% endif %}
 {% endblock %}

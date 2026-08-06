@@ -133,3 +133,51 @@ async def admin_delete_user(
             manager.delete_monitor(mid)
     user_store.delete(target.username)
     return RedirectResponse(url="/admin", status_code=303)
+
+
+ACTIVITY_PER_PAGE = 100
+
+
+@router.get("/activity", response_class=HTMLResponse)
+async def admin_activity(request: Request):
+    """Admin-only view of who did what, and when.
+
+    Covers logins/logouts and monitor lifecycle actions. A row with no username
+    is system-initiated (the auto-stop rule, or resume at boot) rather than a
+    person. The audit table is never pruned: it is small, and it is the thing
+    you would most regret truncating.
+    """
+    admin = require_admin(request)
+    telemetry = request.app.state.telemetry
+    templates = request.app.state.templates
+
+    username = request.query_params.get("user") or None
+    event = request.query_params.get("event") or None
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+    except ValueError:
+        page = 1
+
+    total = telemetry.count_events(username=username, event=event)
+    page_count = max(1, -(-total // ACTIVITY_PER_PAGE))
+    page = min(page, page_count)
+    events = telemetry.get_events(
+        limit=ACTIVITY_PER_PAGE, offset=(page - 1) * ACTIVITY_PER_PAGE,
+        username=username, event=event,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "admin_activity.html",
+        {
+            "user": admin.username,
+            "is_admin": True,
+            "events": events,
+            "users": request.app.state.user_store.list_users(),
+            "total": total,
+            "page": page,
+            "page_count": page_count,
+            "filter_user": username or "",
+            "filter_event": event or "",
+        },
+    )

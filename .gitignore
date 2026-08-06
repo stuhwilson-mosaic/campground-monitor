@@ -8,7 +8,22 @@ __pycache__/
 .pytest_cache/
 .playwright-mcp/
 .session_cookies.json
-RIDBFullExport_V1_CSV/
+# Glob, not an exact name: refreshing the export tends to leave dated or
+# -old copies beside it, and those are ~230 MB each.
+RIDBFullExport_V1_CSV*/
+
+# 3.6 GB of raw reservation data. Untracked AND unignored until 2026-08-05,
+# so a stray `git add .` would have staged the lot into the repo.
+reservations2024/
+
+# Telemetry (Project D). The glob covers the WAL and shared-memory sidecars.
+data/telemetry.db*
+
+# Dev scratch at the repo root: screenshots and captured API responses.
+# Root-anchored so app/static/ images are unaffected.
+/*.png
+/permit_*.json
+/ridb_swagger.yaml
 
 # Local-only — kept out of the shared repo (development docs, AI instructions, tests)
 CLAUDE.md

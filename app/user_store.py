@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -252,3 +253,55 @@ class UserStore:
 
     def admin_count(self) -> int:
         return sum(1 for u in self._read()["users"] if u["role"] == "admin")
+
+    # ── Favorites ─────────────────────────────────────────────────────────────
+    #
+    # A favorite is a saved facility selection: the rec area plus the exact
+    # facilities (and, for permits, the trailhead divisions) chosen. Its
+    # `facilities` list mirrors the monitor `facilities` shape exactly, which is
+    # what lets the wizard seed builder copy it rather than transform it.
+    #
+    # Stored on the user record rather than in a new file: they are per-user,
+    # small, and read on the same path as `defaults`. A record with no
+    # "favorites" key reads as empty, so existing users need no migration.
+
+    def list_favorites(self, username: str) -> list[dict]:
+        uname = self._normalize_username(username)
+        for u in self._read()["users"]:
+            if u["username"] == uname:
+                return list(u.get("favorites", []))
+        return []
+
+    def add_favorite(self, username: str, favorite: dict) -> dict | None:
+        """Append a favorite, assigning it an id. Returns it, or None if no user."""
+        uname = self._normalize_username(username)
+        data = self._read()
+        for u in data["users"]:
+            if u["username"] == uname:
+                fav = dict(favorite)
+                fav.setdefault("id", str(uuid.uuid4()))
+                fav.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+                u.setdefault("favorites", []).append(fav)
+                self._write(data)
+                return fav
+        return None
+
+    def delete_favorite(self, username: str, favorite_id: str) -> bool:
+        uname = self._normalize_username(username)
+        data = self._read()
+        for u in data["users"]:
+            if u["username"] == uname:
+                favs = u.get("favorites", [])
+                remaining = [f for f in favs if f.get("id") != favorite_id]
+                if len(remaining) == len(favs):
+                    return False
+                u["favorites"] = remaining
+                self._write(data)
+                return True
+        return False
+
+    def get_favorite(self, username: str, favorite_id: str) -> dict | None:
+        for f in self.list_favorites(username):
+            if f.get("id") == favorite_id:
+                return f
+        return None

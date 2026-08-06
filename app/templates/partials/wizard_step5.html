@@ -85,7 +85,7 @@ function appendReviewRow(dl, label, value) {
     ul.replaceChildren();
     if (wizardData.facility_ids && wizardData.facility_ids.length > 0) {
       wizardData.facility_ids.forEach(function(fid, i) {
-        var name = (wizardData.facility_names || [])[i] || fid;
+        var name = (wizardData.facility_names || {})[fid] || fid;
         var li = document.createElement("li");
         var divs = (wizardData.selected_divisions || {})[fid] || [];
         if (divs.length > 0) {
@@ -121,10 +121,11 @@ function goToStep4Back() {
 }
 
 function createMonitor(start) {
-  // Build facility_names map from parallel arrays
+  // facility_names is already keyed by id, so no zip step is needed. Any id
+  // without a name falls back to the id itself.
   var facilityNamesMap = {};
-  (wizardData.facility_ids || []).forEach(function(fid, i) {
-    facilityNamesMap[fid] = (wizardData.facility_names || [])[i] || fid;
+  (wizardData.facility_ids || []).forEach(function(fid) {
+    facilityNamesMap[fid] = (wizardData.facility_names || {})[fid] || fid;
   });
 
   var payload = {
@@ -138,6 +139,7 @@ function createMonitor(start) {
     check_out: wizardData.check_out || "",
     entry_date: wizardData.entry_date || "",
     party_size: wizardData.party_size || 1,
+    nights: wizardData._isPermit ? (wizardData.nights || null) : null,
     poll_interval_seconds: wizardData.poll_interval_seconds || 300,
     notify_email: !!wizardData.enable_email,
     notify_ntfy:  !!wizardData.enable_ntfy,

@@ -2,7 +2,13 @@
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.auth import COOKIE_NAME, check_credentials, create_session_cookie
+from app.auth import (
+    COOKIE_NAME,
+    check_credentials,
+    create_session_cookie,
+    get_current_user,
+)
+from app.telemetry import audit
 
 router = APIRouter()
 
@@ -24,6 +30,7 @@ async def login_submit(
     password: str = Form(...),
 ):
     if check_credentials(request.app.state.user_store, username, password):
+        await audit(request, "login", username=username)
         cookie_value = create_session_cookie(username)
         response = RedirectResponse(url="/", status_code=303)
         response.set_cookie(
@@ -44,7 +51,8 @@ async def login_submit(
 
 
 @router.get("/logout")
-async def logout():
+async def logout(request: Request):
+    await audit(request, "logout", username=get_current_user(request))
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(key=COOKIE_NAME)
     return response

@@ -2,15 +2,72 @@
 import asyncio
 import uuid
 from datetime import date, datetime
+from html import escape
 from typing import Any, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from app.auth import get_current_user, require_monitor_access
+from app.telemetry import audit
 
 router = APIRouter(prefix="/api")
+
+
+# ── Monitor validation ────────────────────────────────────────────────────────
+#
+# Split into two functions on purpose. Creating a monitor needs both; editing an
+# existing monitor's dates already knows the type and needs only the second.
+# Keeping them separate stops the two paths from drifting apart.
+
+
+def resolve_facility_type(facility_ids: list[str], facility_types: dict[str, str]) -> str:
+    """Return the single facility type for a monitor.
+
+    Raises ValueError if the selection is empty or mixes types. Mixed selections
+    are unserviceable: _run_check routes per facility, so whichever half lacks
+    its dates calls its check function with empty strings and raises on every
+    cycle forever.
+    """
+    if not facility_ids:
+        return _fail("Select at least one facility.")
+
+    kinds = {facility_types.get(fid, "Campground") for fid in facility_ids}
+    if len(kinds) > 1:
+        return _fail(
+            "A monitor watches either campgrounds or wilderness permits, not both. "
+            f"Got: {', '.join(sorted(kinds))}. Create one monitor for each."
+        )
+    return kinds.pop()
+
+
+def validate_dates_for_type(
+    kind: str,
+    check_in: str,
+    check_out: str,
+    entry_date: str,
+    nights: Optional[int] = None,
+) -> None:
+    """Validate the date fields that matter for `kind`. Raises ValueError."""
+    if kind == "Permit":
+        if not entry_date:
+            _fail("Permit monitors need an entry date.")
+        if nights is not None and nights < 1:
+            _fail("Nights must be at least 1.")
+        return
+
+    if not check_in or not check_out:
+        _fail("Campground monitors need both a check-in and a check-out date.")
+    # ISO YYYY-MM-DD compares correctly as a string, which is how the wizard
+    # already does it. A zero- or negative-length stay makes dates_needed()
+    # return [], and all([]) is True, so every site would report available.
+    if check_out <= check_in:
+        _fail("Check-out must be after check-in.")
+
+
+def _fail(message: str):
+    raise ValueError(message)
 
 
 def _card_response(request: Request, monitor_id: str) -> HTMLResponse:
@@ -28,33 +85,42 @@ def _card_response(request: Request, monitor_id: str) -> HTMLResponse:
 
 @router.post("/monitors/{monitor_id}/start", response_class=HTMLResponse)
 async def start_monitor(monitor_id: str, request: Request):
-    require_monitor_access(request, monitor_id)
+    user, monitor = require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.start_monitor(monitor_id)
+    await audit(request, "monitor.start", username=user.username,
+                target_id=monitor_id, target_name=monitor.get("name"))
     return _card_response(request, monitor_id)
 
 
 @router.post("/monitors/{monitor_id}/pause", response_class=HTMLResponse)
 async def pause_monitor(monitor_id: str, request: Request):
-    require_monitor_access(request, monitor_id)
+    user, monitor = require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.pause_monitor(monitor_id)
+    await audit(request, "monitor.pause", username=user.username,
+                target_id=monitor_id, target_name=monitor.get("name"))
     return _card_response(request, monitor_id)
 
 
 @router.post("/monitors/{monitor_id}/stop", response_class=HTMLResponse)
 async def stop_monitor(monitor_id: str, request: Request):
-    require_monitor_access(request, monitor_id)
+    user, monitor = require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.stop_monitor(monitor_id)
+    await audit(request, "monitor.stop", username=user.username,
+                target_id=monitor_id, target_name=monitor.get("name"))
     return _card_response(request, monitor_id)
 
 
 @router.delete("/monitors/{monitor_id}", response_class=HTMLResponse)
 async def delete_monitor(monitor_id: str, request: Request):
-    require_monitor_access(request, monitor_id)
+    user, monitor = require_monitor_access(request, monitor_id)
     manager = request.app.state.manager
     await manager.stop_monitor(monitor_id)
+    # Capture the name before the row is gone.
+    await audit(request, "monitor.delete", username=user.username,
+                target_id=monitor_id, target_name=monitor.get("name"))
     manager.delete_monitor(monitor_id)
     return HTMLResponse("")
 
@@ -85,8 +151,25 @@ class CreateMonitorRequest(BaseModel):
     status: str = "stopped"
     entry_date: str = ""
     party_size: int = 1
+    nights: Optional[int] = None  # permit-only, metadata only (see below)
     facility_types: dict[str, str] = {}
     selected_divisions: dict[str, list[str]] = {}  # {facility_id: [division_id, ...]}
+
+    @model_validator(mode="after")
+    def _check_type_and_dates(self):
+        """Reject monitors the poll loop could never service.
+
+        `nights` never reaches check_permit: the recreation.gov permit API has
+        no duration dimension at all (a day/division record is just
+        quota_usage_by_member_daily plus is_walkup), because Yosemite wilderness
+        quota applies to the entry trailhead on the entry date only. It is
+        recorded for display and for what to actually book.
+        """
+        kind = resolve_facility_type(self.facility_ids, self.facility_types)
+        validate_dates_for_type(
+            kind, self.check_in, self.check_out, self.entry_date, self.nights
+        )
+        return self
 
 
 @router.post("/monitors")
@@ -121,6 +204,7 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
         "check_out": body.check_out,
         "entry_date": body.entry_date,
         "party_size": body.party_size,
+        "nights": body.nights,
         "poll_interval_seconds": body.poll_interval_seconds,
         "enable_ntfy": body.notify_ntfy,
         "ntfy_topic": body.ntfy_topic,
@@ -156,7 +240,120 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
             defaults["ntfy_topic"] = body.ntfy_topic
         user_store.update_defaults(user, defaults)
 
+    await audit(request, "monitor.create", username=user,
+                target_id=monitor_id, target_name=body.name)
     return JSONResponse({"id": monitor_id, "status": "ok"})
+
+
+# ── Edit a monitor's dates ────────────────────────────────────────────────────
+
+
+class UpdateDatesRequest(BaseModel):
+    check_in: str = ""
+    check_out: str = ""
+    entry_date: str = ""
+    nights: Optional[int] = None
+
+
+@router.post("/monitors/{monitor_id}/dates")
+async def update_monitor_dates(monitor_id: str, body: UpdateDatesRequest, request: Request):
+    """Change an existing monitor's dates.
+
+    Requires the monitor to be stopped or paused. Editing a live monitor was
+    rejected in favour of this: it removes every question about a poll cycle
+    running mid-change, at the cost of two extra clicks.
+    """
+    user, monitor = require_monitor_access(request, monitor_id)
+    manager = request.app.state.manager
+
+    if monitor.get("status") == "running":
+        return JSONResponse(
+            {"error": "Stop the monitor before editing its dates."},
+            status_code=409,
+        )
+
+    # Same rules as creation, via the same functions, so the two cannot drift.
+    kind = resolve_facility_type(
+        [f["id"] for f in monitor.get("facilities", []) if f.get("id")],
+        {f["id"]: f.get("type", "Campground")
+         for f in monitor.get("facilities", []) if f.get("id")},
+    )
+    try:
+        validate_dates_for_type(
+            kind, body.check_in, body.check_out, body.entry_date, body.nights
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+
+    if kind == "Permit":
+        manager.update_monitor(
+            monitor_id, entry_date=body.entry_date, nights=body.nights,
+            check_in="", check_out="",
+        )
+    else:
+        manager.update_monitor(
+            monitor_id, check_in=body.check_in, check_out=body.check_out,
+            entry_date="", nights=None,
+        )
+
+    # The dedup ledger refers to the old date window; keeping it would suppress
+    # the first alert under the new dates.
+    manager.clear_notified(monitor_id)
+    await audit(request, "monitor.edit", username=user.username,
+                target_id=monitor_id, target_name=monitor.get("name"),
+                detail={"kind": kind})
+    return JSONResponse({"status": "ok"})
+
+
+# ── Favorites ─────────────────────────────────────────────────────────────────
+
+
+class CreateFavoriteRequest(BaseModel):
+    label: str
+    rec_area_id: str = ""
+    rec_area_name: str = ""
+    facilities: list[dict[str, Any]] = []
+
+    @model_validator(mode="after")
+    def _check(self):
+        if not self.label.strip():
+            raise ValueError("A favorite needs a label.")
+        if not self.facilities:
+            raise ValueError("A favorite needs at least one facility.")
+        kinds = {f.get("type", "Campground") for f in self.facilities}
+        if len(kinds) > 1:
+            # Same rule as monitors: a favorite seeds a monitor, and a monitor
+            # watches one facility type.
+            raise ValueError("A favorite cannot mix campgrounds and permits.")
+        return self
+
+
+@router.post("/favorites")
+async def create_favorite(body: CreateFavoriteRequest, request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    store = request.app.state.user_store
+    fav = store.add_favorite(user, body.model_dump())
+    if fav is None:
+        return JSONResponse({"error": "Unknown user"}, status_code=404)
+    return JSONResponse({"id": fav["id"], "status": "ok"})
+
+
+@router.delete("/favorites/{favorite_id}")
+async def delete_favorite(favorite_id: str, request: Request):
+    """Delete one of the CALLING user's favorites.
+
+    Scoped to the caller by construction: the store only ever looks inside that
+    user's record, so a foreign id is simply not found.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    store = request.app.state.user_store
+    if not store.delete_favorite(user, favorite_id):
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    return HTMLResponse("")
 
 
 # ── Catalog filter endpoints (HTMX) ───────────────────────────────────────────
@@ -186,27 +383,46 @@ async def api_rec_areas(
     org: str = "",
     q: Optional[str] = None,
 ):
-    """Return HTML list items for rec areas matching state/org/query."""
+    """Return HTML list items for rec areas matching state/org/query.
+
+    A query searches the whole catalog and ignores state/org. Without one, the
+    state+org drill-down still applies exactly as before. Search has to work
+    unfiltered because facilities with no address row land in the "Other" state
+    bucket and are otherwise unreachable: 87 of 149 permits in the real export.
+    """
     user = get_current_user(request)
     if not user:
         return HTMLResponse("Unauthorized", status_code=401)
     catalog = request.app.state.catalog
-    if not state or not org:
-        return HTMLResponse('<li class="rec-area-empty">Select a state and agency first.</li>')
-    if q:
-        areas = catalog.search_rec_areas(state, org, q)
-    else:
+
+    query = (q or "").strip()
+    if query:
+        areas = catalog.search_all_rec_areas(query)
+    elif state and org:
         areas = catalog.get_rec_areas(state, org)
+    else:
+        return HTMLResponse(
+            '<li class="rec-area-empty">Search for a park, or pick a state and agency.</li>'
+        )
+
     if not areas:
         return HTMLResponse('<li class="rec-area-empty">No parks found.</li>')
+
+    # Park names come from a third-party CSV and reach the browser verbatim.
+    # The old markup interpolated the name into an inline onclick and defended
+    # only against apostrophes, so a name containing a quote or angle bracket
+    # broke the element. Data attributes plus escaping remove the whole class
+    # of problem; the click is handled by a delegated listener in wizard.html.
     parts = []
     for ra in areas:
+        states = ", ".join(ra.get("states", []))
+        suffix = f" &middot; {escape(states)}" if states else ""
         parts.append(
             f'<li class="rec-area-item" '
-            f'onclick="selectRecArea(\'{ra["id"]}\', \'{ra["name"].replace(chr(39), "")}\''
-            f')">'
-            f'{ra["name"]} '
-            f'<span class="rec-area-count">({ra["facility_count"]} sites)</span>'
+            f'data-rec-area-id="{escape(ra["id"], quote=True)}" '
+            f'data-rec-area-name="{escape(ra["name"], quote=True)}">'
+            f'{escape(ra["name"])} '
+            f'<span class="rec-area-count">({ra["facility_count"]} sites{suffix})</span>'
             f'</li>'
         )
     return HTMLResponse("".join(parts))

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Activity — Campground Monitor{% endblock %}
+{% block content %}
+<div class="flex-between mb-3">
+  <div>
+    <h2 class="page-title">Activity</h2>
+    <span class="text-muted text-small">{{ total }} event{{ '' if total == 1 else 's' }}</span>
+  </div>
+  <a href="/admin" class="btn btn-sm btn-outline-primary">&larr; Users</a>
+</div>
+
+<form method="get" action="/admin/activity" class="form-row mb-3">
+  <div class="form-group">
+    <label class="form-label" for="user">User</label>
+    <select id="user" name="user" class="form-control">
+      <option value="">All users</option>
+      {% for u in users %}
+      <option value="{{ u.username }}" {{ 'selected' if filter_user == u.username else '' }}>{{ u.username }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label" for="event">Event</label>
+    <select id="event" name="event" class="form-control">
+      <option value="">All events</option>
+      {% for e in ["login", "logout", "monitor.create", "monitor.start",
+                   "monitor.pause", "monitor.stop", "monitor.edit", "monitor.delete"] %}
+      <option value="{{ e }}" {{ 'selected' if filter_event == e else '' }}>{{ e }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-group" style="justify-content: flex-end;">
+    <button class="btn btn-primary" type="submit">Filter</button>
+  </div>
+</form>
+
+{% if not events %}
+<p class="text-muted">No activity recorded yet.</p>
+{% else %}
+<table class="log-table">
+  <thead><tr><th>When</th><th>User</th><th>Event</th><th>Target</th><th>IP</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr>
+      <td class="text-small">{{ e.ts[:19] }}Z</td>
+      {# No username means the system did it, not a person. #}
+      <td>{{ e.username if e.username else "system" }}</td>
+      <td><code class="text-small">{{ e.event }}</code></td>
+      <td class="text-small">{{ e.target_name or e.target_id or "" }}</td>
+      <td class="text-small text-muted">{{ e.ip or "" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if page_count > 1 %}
+<div class="flex-between mt-3">
+  {% if page > 1 %}
+  <a class="btn btn-sm btn-outline-primary"
+     href="/admin/activity?page={{ page - 1 }}&user={{ filter_user }}&event={{ filter_event }}">&larr; Newer</a>
+  {% else %}<span></span>{% endif %}
+  <span class="text-muted text-small">Page {{ page }} of {{ page_count }}</span>
+  {% if page < page_count %}
+  <a class="btn btn-sm btn-outline-primary"
+     href="/admin/activity?page={{ page + 1 }}&user={{ filter_user }}&event={{ filter_event }}">Older &rarr;</a>
+  {% else %}<span></span>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -38,12 +38,17 @@
 
   <!-- Wizard content area — partials load here via HTMX -->
   <div id="wizard-content"
-       hx-get="/monitors/new/step1"
+       hx-get="/monitors/new/step{{ start_step | default(1) }}"
        hx-trigger="load"
        hx-swap="innerHTML">
     <div class="loading">Loading&#8230;</div>
   </div>
 </div>
+
+<!-- Prefill from a cloned monitor or a saved favorite. Delivered as a JSON
+     block rather than interpolated into the script below: facility and park
+     names come from a third-party CSV and contain apostrophes and non-ASCII. -->
+<script id="wizard-seed" type="application/json">{{ seed_json | default('{}') | safe }}</script>
 
 <script>
 // ── Wizard state ───────────────────────────────────────────────────────────────
@@ -54,7 +59,12 @@ var wizardData = {
   rec_area_id: "",
   rec_area_name: "",
   facility_ids: [],
-  facility_names: [],
+  // Keyed by facility id, matching facility_types and the API contract.
+  // This used to be an array parallel to facility_ids, zipped back together by
+  // index at submit time. Removal filtered it BY VALUE, so two facilities
+  // sharing a name desynchronized the arrays permanently and every later
+  // facility was submitted under the wrong name.
+  facility_names: {},
   facility_types: {},
   check_in: "",
   check_out: "",
@@ -67,6 +77,22 @@ var wizardData = {
   email_to: "",
   selected_divisions: {},  // {facility_id: [div_id, ...]}
 };
+
+// Overlay the seed, if any. Only keys actually present in the seed are
+// applied, so an empty seed leaves every default untouched.
+(function () {
+  var el = document.getElementById("wizard-seed");
+  if (!el) return;
+  var seed;
+  try {
+    seed = JSON.parse(el.textContent || "{}");
+  } catch (e) {
+    return;  // A malformed seed must not break the wizard.
+  }
+  Object.keys(seed || {}).forEach(function (k) {
+    if (seed[k] !== null && seed[k] !== undefined) wizardData[k] = seed[k];
+  });
+})();
 
 // ── Step navigation ────────────────────────────────────────────────────────────
 function setStep(n) {
@@ -130,8 +156,8 @@ function updateFacilitySelection(checkbox) {
   if (checkbox.checked) {
     if (!wizardData.facility_ids.includes(id)) {
       wizardData.facility_ids.push(id);
-      wizardData.facility_names.push(name);
     }
+    wizardData.facility_names[id] = name;
     wizardData.facility_types[id] = facType;
 
     // For permits, show trailhead picker below the checkbox
@@ -140,7 +166,7 @@ function updateFacilitySelection(checkbox) {
     }
   } else {
     wizardData.facility_ids = wizardData.facility_ids.filter(function(v) { return v !== id; });
-    wizardData.facility_names = wizardData.facility_names.filter(function(v) { return v !== name; });
+    delete wizardData.facility_names[id];
     delete wizardData.facility_types[id];
     delete wizardData.selected_divisions[id];
 
@@ -158,7 +184,110 @@ function updateFacilitySelection(checkbox) {
   if (nextBtn) {
     nextBtn.disabled = wizardData.facility_ids.length === 0;
   }
+  applyTypeLock();
 }
+
+// ── Single facility type per monitor ──────────────────────────────────────────
+//
+// A monitor watches campgrounds OR wilderness permits, never both: they need
+// different dates (arrive/depart vs a single entry date), and _run_check routes
+// per facility, so a mixed monitor calls check_campground(id, "", "") forever.
+// The server rejects mixed selections too; this just stops you building one.
+
+function currentLockedType() {
+  var ids = wizardData.facility_ids || [];
+  if (!ids.length) return null;
+  return wizardData.facility_types[ids[0]] || null;
+}
+
+function applyTypeLock() {
+  var locked = currentLockedType();
+  document.querySelectorAll('#facility-list input[type="checkbox"][data-type]')
+    .forEach(function(cb) {
+      // Never disable something already checked, or the user couldn't undo it.
+      cb.disabled = locked !== null && cb.dataset.type !== locked && !cb.checked;
+      var row = cb.closest(".facility-item") || cb.parentElement;
+      if (row) row.classList.toggle("facility-type-locked", cb.disabled);
+    });
+
+  var hint = document.getElementById("facility-type-hint");
+  if (!hint) return;
+  if (!locked) {
+    hint.style.display = "none";
+    hint.textContent = "";
+    return;
+  }
+  hint.style.display = "";
+  hint.textContent =
+    "This monitor is watching " +
+    (locked === "Permit" ? "wilderness permits" : "campgrounds") +
+    ". One monitor can't mix the two, so the rest are greyed out. " +
+    "Clear your selection to switch, or create a second monitor.";
+}
+
+function restoreFacilityChecks() {
+  // htmx replaces #facility-list wholesale on every type-tab click, so the DOM
+  // arrives with nothing checked even though wizardData still holds the
+  // selection. Without this the lock would read a stale, empty selection.
+  var ids = wizardData.facility_ids || [];
+  document.querySelectorAll('#facility-list input[type="checkbox"][value]')
+    .forEach(function(cb) { cb.checked = ids.indexOf(cb.value) !== -1; });
+}
+
+document.addEventListener("htmx:afterSwap", function(evt) {
+  if (evt.target && evt.target.id === "facility-list") {
+    restoreFacilityChecks();
+    applyTypeLock();
+  }
+});
+
+function saveSelectionAsFavorite() {
+  var msg = document.getElementById("save-favorite-msg");
+  var ids = wizardData.facility_ids || [];
+  if (!ids.length) {
+    if (msg) msg.textContent = "Select at least one facility first.";
+    return;
+  }
+  var label = prompt("Name this favorite:",
+                     wizardData.rec_area_name || "My selection");
+  if (!label) return;
+
+  // Same shape the monitor stores, so seeding is a copy rather than a transform.
+  var facilities = ids.map(function (fid) {
+    var f = { id: fid,
+              name: (wizardData.facility_names || {})[fid] || fid,
+              type: (wizardData.facility_types || {})[fid] || "Campground" };
+    var divs = (wizardData.selected_divisions || {})[fid];
+    if (divs && divs.length) f.division_ids = divs;
+    return f;
+  });
+
+  fetch("/api/favorites", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      label: label,
+      rec_area_id: wizardData.rec_area_id || "",
+      rec_area_name: wizardData.rec_area_name || "",
+      facilities: facilities,
+    }),
+  }).then(function (r) {
+    if (msg) msg.textContent = r.ok ? "Saved to favorites."
+                                    : "Could not save favorite.";
+  }).catch(function () {
+    if (msg) msg.textContent = "Could not save favorite.";
+  });
+}
+
+// Rec-area results are rebuilt by htmx on every keystroke, so the click is
+// delegated rather than bound per row. The row carries the id and name in data
+// attributes instead of an inline onclick: park names come from a third-party
+// CSV and a name containing a quote used to break the generated markup.
+document.addEventListener("click", function(evt) {
+  var row = evt.target.closest ? evt.target.closest(".rec-area-item") : null;
+  if (!row || !row.dataset.recAreaId) return;
+  selectRecArea(row.dataset.recAreaId, row.dataset.recAreaName || "");
+});
 
 function showDivisionPicker(checkbox, facilityId) {
   var existing = document.getElementById("divisions-" + facilityId);

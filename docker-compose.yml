@@ -13,13 +13,29 @@ services:
     environment:
       - DATA_DIR=/data
       - RIDB_DIR=/ridb
+    # The json-file driver is unbounded by default. The previous container
+    # accumulated 62k lines over two months with nothing reclaiming it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
+  # Optional. Only needed to expose the app on a public hostname.
+  #
+  # CLOUDFLARED_CREDENTIALS carries a default because an unset variable in
+  # short-form volume syntax fails to parse the ENTIRE file, before Compose even
+  # picks a service:
+  #   invalid spec: :/etc/cloudflared/credentials.json:ro: empty section between colons
+  # That broke `docker compose up -d app` for anyone cloning without a tunnel,
+  # which is the documented first-run path. The default only takes effect when
+  # the variable is unset, in which case this service is not meant to run.
   tunnel:
     image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config.yml run ${CAMP_TUNNEL_ID}
+    command: tunnel --config /etc/cloudflared/config.yml run ${CAMP_TUNNEL_ID:-}
     depends_on:
       - app
     volumes:
       - ./cloudflared-camp.yml:/etc/cloudflared/config.yml:ro
-      - ${CLOUDFLARED_CREDENTIALS}:/etc/cloudflared/credentials.json:ro
+      - ${CLOUDFLARED_CREDENTIALS:-/dev/null}:/etc/cloudflared/credentials.json:ro
     restart: unless-stopped

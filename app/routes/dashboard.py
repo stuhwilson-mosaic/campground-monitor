@@ -34,6 +34,9 @@ async def dashboard(request: Request):
             "running_count": running_count,
             "paused_count": paused_count,
             "today": today,
+            # Always the caller's own, even for an admin: favorites are a
+            # personal shortcut, not something to administer.
+            "favorites": request.app.state.user_store.list_favorites(user.username),
         },
     )
 

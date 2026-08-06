@@ -7,8 +7,14 @@ from typing import Optional
 # Facility types we care about
 _ALLOWED_TYPES = {"Campground", "Permit"}
 
-# Entity types that link a facility to an org
-_FACILITY_ENTITY_TYPES = {"Campground", "Facility"}
+# Entity types in OrgEntities that link a facility to its org.
+# "Permit" belongs here: RIDB files permit facilities under that entity type,
+# and omitting it left every permit with no org id. get_agencies() skips
+# anything with a falsy org, so permits disappeared from the wizard's
+# state -> agency -> park drill-down entirely. Yosemite (445859) only ever
+# worked by accident, because get_facilities applies no org filter and the
+# park's campgrounds pulled its rec area into the list anyway.
+_FACILITY_ENTITY_TYPES = {"Campground", "Facility", "Permit"}
 
 # Normalize messy AddressStateCode values (full names, all-caps, etc.) to 2-letter codes
 _STATE_NAME_TO_CODE = {
@@ -209,6 +215,57 @@ class RIDBCatalog:
             ra for ra in self.get_rec_areas(state, org_id)
             if q in ra["name"].lower()
         ]
+
+    def search_all_rec_areas(self, query: str, limit: int = 50) -> list[dict]:
+        """Search every rec area by name or keyword, with no state or org filter.
+
+        get_rec_areas/search_rec_areas both require a state AND an org, which
+        makes them useless for facilities that have no address row: those land
+        in the "Other" state bucket and never surface in the drill-down. In the
+        real export that is 87 of 149 permits.
+
+        Only rec areas that actually contain a qualifying facility are
+        searched (555 of 3,643 in the current export), so every hit leads
+        somewhere. Exact prefix matches sort ahead of interior matches.
+        """
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+
+        results = []
+        for raid, fids in self._ra_facilities.items():
+            if not fids:
+                continue
+            ra = self._rec_areas.get(raid)
+            if not ra:
+                continue
+
+            name = ra.get("RecAreaName", "")
+            haystack = f"{name}\n{ra.get('Keywords', '')}".lower()
+            if q not in haystack:
+                continue
+
+            # RecArea rows have no state column, so derive it from the
+            # facilities to disambiguate same-named parks.
+            states = sorted({
+                self._facilities[fid].get("_state", "")
+                for fid in fids
+                if fid in self._facilities
+            } - {""})
+
+            results.append({
+                "id": raid,
+                "name": name,
+                "facility_count": len(fids),
+                "states": states,
+                # Sort key only; not part of the returned contract.
+                "_rank": 0 if name.lower().startswith(q) else 1,
+            })
+
+        results.sort(key=lambda r: (r["_rank"], r["name"]))
+        for r in results:
+            del r["_rank"]
+        return results[:limit]
 
     def get_facilities(
         self,
