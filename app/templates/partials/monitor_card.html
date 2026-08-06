@@ -16,6 +16,7 @@
        Hovering swaps the label to the action so it does not read as a passive
        badge; the aria-label always states the action for screen readers. #}
     {% set will_do = "Stop" if status == "running" else "Start" %}
+    <div class="card-header-actions">
     <button class="status-badge status-toggle {{ status }}"
             hx-post="/api/monitors/{{ m.id }}/{{ 'stop' if status == 'running' else 'start' }}"
             hx-target="#monitor-{{ m.id }}"
@@ -25,6 +26,30 @@
       <span class="status-word">{{ status }}</span>
       <span class="status-verb" aria-hidden="true">{{ will_do }}</span>
     </button>
+
+      <details class="card-menu">
+        <summary class="btn btn-sm btn-outline-secondary card-menu-toggle"
+                 title="More actions" aria-label="More actions">&#8943;</summary>
+        <div class="card-menu-items">
+          {% if status == "running" %}
+          <button class="card-menu-item" disabled
+                  title="Stop the monitor first to edit it">Edit</button>
+          {% else %}
+          <a href="/monitors/{{ m.id }}/edit" class="card-menu-item">Edit</a>
+          {% endif %}
+          <a href="/monitors/new?from={{ m.id }}" class="card-menu-item"
+             title="Start a new monitor from this one's settings">Clone</a>
+          <a href="/logs/{{ m.id }}" class="card-menu-item">Logs</a>
+          <button class="card-menu-item"
+                  onclick="testAlert(this, '{{ m.id }}')">Test Alert</button>
+          <button class="card-menu-item card-menu-item-danger"
+                  hx-delete="/api/monitors/{{ m.id }}"
+                  hx-target="#monitor-{{ m.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Delete this monitor?">Delete</button>
+        </div>
+      </details>
+    </div>
   </div>
 
   <div class="monitor-card-meta mb-2">
@@ -92,31 +117,5 @@
      <details> rather than a JS dropdown: no click-outside handling, no z-index
      bugs, keyboard accessible for free. The card is re-rendered by HTMX after
      start/stop, so the menu closing on those is expected. #}
-  {# No Start/Stop button here: the status pill in the header does that, which
-     also keeps it reachable while this section is collapsed. #}
-  <div class="monitor-card-actions mt-2">
-    <details class="card-menu">
-      <summary class="btn btn-sm btn-outline-secondary card-menu-toggle"
-               title="More actions" aria-label="More actions">&#8943;</summary>
-      <div class="card-menu-items">
-        {% if status == "running" %}
-        <button class="card-menu-item" disabled
-                title="Stop the monitor first to edit it">Edit</button>
-        {% else %}
-        <a href="/monitors/{{ m.id }}/edit" class="card-menu-item">Edit</a>
-        {% endif %}
-        <a href="/monitors/new?from={{ m.id }}" class="card-menu-item"
-           title="Start a new monitor from this one's settings">Clone</a>
-        <a href="/logs/{{ m.id }}" class="card-menu-item">Logs</a>
-        <button class="card-menu-item"
-                onclick="testAlert(this, '{{ m.id }}')">Test Alert</button>
-        <button class="card-menu-item card-menu-item-danger"
-                hx-delete="/api/monitors/{{ m.id }}"
-                hx-target="#monitor-{{ m.id }}"
-                hx-swap="outerHTML"
-                hx-confirm="Delete this monitor?">Delete</button>
-      </div>
-    </details>
-  </div>
   </details>
 </div>

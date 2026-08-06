@@ -1433,12 +1433,13 @@ details[open] > .log-summary::before { content: "\25BE"; }
 .card-menu-toggle::-webkit-details-marker { display: none; }
 .card-menu-items {
     position: absolute;
-    /* Anchored LEFT, not right. The toggle sits immediately after Stop, so it
-       is always near the card's left edge; right-aligning made the menu grow
-       leftward and run off the screen on mobile (a 144px menu from a toggle at
-       x~118 starts at -26). Growing rightward has the whole card width to use. */
-    left: 0;
-    right: auto;
+    /* Anchored RIGHT, because the toggle now lives in the card header at the
+       right edge; growing rightward from there would run off the screen.
+       (When the toggle sat at the card's LEFT edge this had to be the
+       opposite, and getting it wrong put the menu at x=-24 on mobile. The
+       anchor must always oppose the edge the toggle sits nearest.) */
+    right: 0;
+    left: auto;
     top: calc(100% + .25rem);
     z-index: 20;
     min-width: 9rem;
@@ -1565,4 +1566,13 @@ details[open] > .log-summary::before { content: "\25BE"; }
 @media (max-width: 640px) {
     /* Touch target: it is now a control, not a label. */
     .status-toggle { min-height: 36px; padding-left: .7rem; padding-right: .7rem; }
+}
+
+/* Pill + overflow menu, grouped at the top-right of the card so both survive
+   the body being collapsed. */
+.card-header-actions {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    flex-shrink: 0;
 }
