@@ -65,13 +65,21 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         pruner = asyncio.create_task(_prune_telemetry_forever(), name="telemetry-prune")
+        # Best-effort and backgrounded: it makes outbound calls, and startup
+        # must not wait on recreation.gov being reachable.
+        backfill = asyncio.create_task(
+            manager.backfill_division_names(), name="division-name-backfill"
+        )
         await manager.resume_all()
         yield
-        pruner.cancel()
-        try:
-            await pruner
-        except asyncio.CancelledError:
-            pass
+        for task in (pruner, backfill):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                log.exception("background task failed during shutdown")
         await manager.stop_all()
         telemetry.close()
 

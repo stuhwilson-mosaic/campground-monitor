@@ -261,8 +261,19 @@ document.addEventListener("htmx:afterSwap", function(evt) {
     var facilityId = evt.target.id.slice("divisions-".length);
     var chosen = (wizardData.selected_divisions || {})[facilityId] || [];
     if (!chosen.length) return;
+    if (!wizardData.selected_division_names[facilityId]) {
+      wizardData.selected_division_names[facilityId] = {};
+    }
     evt.target.querySelectorAll('input[type="checkbox"][value]')
-      .forEach(function (cb) { cb.checked = chosen.indexOf(cb.value) !== -1; });
+      .forEach(function (cb) {
+        if (chosen.indexOf(cb.value) === -1) return;
+        cb.checked = true;
+        // Capture the name here too. Ticking a box in code does not fire
+        // onchange, and cloning a monitor saved before names were stored
+        // arrives with ids only. This is where those clones self-heal.
+        wizardData.selected_division_names[facilityId][cb.value] =
+          cb.dataset.name || cb.value;
+      });
   }
 });
 

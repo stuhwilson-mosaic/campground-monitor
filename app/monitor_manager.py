@@ -15,7 +15,13 @@ from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from app.monitor_engine import check_campground, check_permit, send_email, send_ntfy
+from app.monitor_engine import (
+    check_campground,
+    check_permit,
+    get_permit_divisions,
+    send_email,
+    send_ntfy,
+)
 from app.config import EMAIL_FROM, EMAIL_PASSWORD, SMTP_PORT, SMTP_SERVER
 
 log = logging.getLogger(__name__)
@@ -262,6 +268,63 @@ class MonitorManager:
         else:
             stats["last_stopped_at"] = datetime.now(timezone.utc).isoformat()
             self.update_monitor(monitor_id, status="stopped", stats=stats)
+
+    async def backfill_division_names(self) -> int:
+        """Resolve trailhead ids to names for monitors saved without them.
+
+        Trailhead names are captured by the wizard at creation, but monitors
+        created before that shipped only have ids, and the dashboard then shows
+        raw numbers like "44585907" where a name belongs. Cloning does not fix
+        it either, since a clone copies whatever its source had.
+
+        One API call per distinct permit facility (the results are cached
+        process-wide), run in a thread so it never blocks the event loop, and
+        entirely best-effort: any failure leaves the ids in place.
+
+        Returns the number of facilities updated.
+        """
+        monitors = self.list_monitors()
+        needed = {
+            f["id"]
+            for m in monitors
+            for f in m.get("facilities") or []
+            if f.get("division_ids") and not f.get("division_names") and f.get("id")
+        }
+        if not needed:
+            return 0
+
+        resolved: dict[str, dict[str, str]] = {}
+        for facility_id in needed:
+            try:
+                resolved[facility_id] = await asyncio.to_thread(
+                    get_permit_divisions, facility_id
+                )
+            except Exception:
+                log.warning(
+                    "backfill_division_names: could not resolve names for %s; "
+                    "leaving ids in place", facility_id, exc_info=True,
+                )
+
+        if not resolved:
+            return 0
+
+        # Re-read rather than reusing the list above: the poll loop rewrites
+        # this file every cycle, so anything read before the awaits is stale.
+        data = self._read()
+        updated = 0
+        for monitor in data["monitors"]:
+            for fac in monitor.get("facilities") or []:
+                names = resolved.get(fac.get("id"))
+                if not names or not fac.get("division_ids") or fac.get("division_names"):
+                    continue
+                mapped = {d: names[d] for d in fac["division_ids"] if d in names}
+                if mapped:
+                    fac["division_names"] = mapped
+                    updated += 1
+        if updated:
+            self._write(data)
+            log.info("backfilled trailhead names for %d facilities", updated)
+        return updated
 
     async def resume_all(self) -> None:
         """Start all monitors whose persisted status is "running" (called at startup)."""

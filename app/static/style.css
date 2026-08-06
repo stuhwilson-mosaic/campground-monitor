@@ -1255,6 +1255,16 @@ h1, h2, h3 {
     .navbar-end { gap: .4rem; }
     .navbar-links { gap: .1rem; }
     .navbar-link { padding: .3rem .45rem; font-size: .75rem; }
+
+    /* The brand wordmark is the first thing to go when space runs out. Adding
+       a fourth nav link (Activity) pushed the bar 28px past a 387px viewport,
+       which made the WHOLE PAGE scroll sideways. The tent icon still links
+       home, so nothing is lost. */
+    .navbar-brand { font-size: 0; }
+    .navbar-brand .brand-icon { font-size: 1.35rem; }
+    /* Never let the bar be what widens the page. */
+    .navbar { max-width: 100vw; overflow-x: auto; }
+    .navbar-links { flex-shrink: 0; }
     .btn-outline-light.btn-sm { padding: .25rem .5rem; font-size: .7rem; min-height: 32px; }
 
     /* Main content */
@@ -1423,10 +1433,17 @@ details[open] > .log-summary::before { content: "\25BE"; }
 .card-menu-toggle::-webkit-details-marker { display: none; }
 .card-menu-items {
     position: absolute;
-    right: 0;
+    /* Anchored LEFT, not right. The toggle sits immediately after Stop, so it
+       is always near the card's left edge; right-aligning made the menu grow
+       leftward and run off the screen on mobile (a 144px menu from a toggle at
+       x~118 starts at -26). Growing rightward has the whole card width to use. */
+    left: 0;
+    right: auto;
     top: calc(100% + .25rem);
     z-index: 20;
     min-width: 9rem;
+    /* Belt and braces for very narrow screens. */
+    max-width: calc(100vw - 2rem);
     display: flex;
     flex-direction: column;
     background: var(--white, #fff);
