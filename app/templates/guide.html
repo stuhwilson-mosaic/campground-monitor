@@ -33,12 +33,32 @@
       It walks you through five steps:
     </p>
     <ol>
-      <li><strong>Location</strong> — Pick a state, then an agency (NPS, USFS, etc.), then search for your park.</li>
-      <li><strong>Facilities</strong> — Select one or more campgrounds or permits within that park. You can filter by type.</li>
-      <li><strong>Dates &amp; schedule</strong> — Set your check-in/check-out dates, give the monitor a name, and choose how often to check (from every 15 seconds to every 30 minutes).</li>
-      <li><strong>Notifications</strong> — Enable push notifications via ntfy and/or email alerts. See the ntfy setup section below.</li>
-      <li><strong>Review</strong> — Confirm everything and create. You can start it immediately or create it paused.</li>
+      <li><strong>Location</strong> — Type a park name in the search box to find it directly. You can also browse by state and agency (NPS, USFS, etc.) if you prefer.</li>
+      <li><strong>Facilities</strong> — Select the campgrounds, or the wilderness permit and its trailheads, within that park.</li>
+      <li><strong>Dates &amp; schedule</strong> — Set your dates, name the monitor, and choose how often to check (every 15 seconds to every 30 minutes).</li>
+      <li><strong>Notifications</strong> — Enable push via ntfy and/or email. Your last-used topic and address are filled in automatically. See the ntfy setup section below.</li>
+      <li><strong>Review</strong> — Confirm everything, then <strong>Create &amp; Start</strong> to begin watching immediately, or <strong>Create Stopped</strong> to save it and start later.</li>
     </ol>
+
+    <div class="guide-callout">
+      <h3>&#9888; One type of thing per monitor</h3>
+      <p>
+        A monitor watches <strong>either campgrounds or wilderness permits</strong>, never both.
+        They need different dates — a campground needs arrive and depart, a permit needs a single
+        entry date — so a mixed monitor cannot be checked correctly. Once you pick one type,
+        the other is greyed out. Create a second monitor for the other half of your trip.
+      </p>
+    </div>
+
+    <div class="guide-callout">
+      <h3>&#127957; Wilderness permits</h3>
+      <p>
+        Permits are booked per <strong>trailhead</strong> and per <strong>entry date</strong>, so pick
+        the specific trailheads you would accept. Quota applies only to your entry trailhead on your
+        entry date, which is why <strong>nights is optional and does not change what gets found</strong>
+        — it is recorded so you know what to book when an alert arrives.
+      </p>
+    </div>
     <div class="guide-callout-amber">
       <h3>&#128337; Polling interval tips</h3>
       <ul>
@@ -54,14 +74,44 @@
     <h2><span class="section-icon">&#9881;</span> Managing your monitors</h2>
     <p>Each monitor card on the dashboard shows its status and recent activity. You can:</p>
     <ul>
-      <li><strong>Start / Pause / Stop</strong> — Control the polling cycle. Paused monitors stay alive but skip checks.</li>
-      <li><strong>Logs</strong> — View the last 20 API checks, including which sites were found and whether alerts were sent.</li>
-      <li><strong>Test Alert</strong> — Send a test notification through your configured channels to verify everything is working.</li>
+      <li><strong>Start / Stop</strong> — Begin or halt the polling cycle.</li>
+      <li><strong>Edit</strong> — Change a stopped monitor's dates and how often it checks. Everything else it watches is shown for reference; to change those, clone it instead.</li>
+      <li><strong>Clone</strong> — Build a new monitor starting from this one. It walks the full wizard with every field pre-filled, so you can shift the dates or swap a campground and review the rest before creating.</li>
+      <li><strong>Logs</strong> — Every request made, with the URL, HTTP status, how long it took, and what was found. History is kept for 30 days and survives restarts.</li>
+      <li><strong>Test Alert</strong> — Send a test notification through your configured channels.</li>
       <li><strong>Delete</strong> — Permanently remove a monitor.</li>
     </ul>
     <p>
+      Running monitors always sort to the top of the dashboard, and
+      <strong>Running only</strong> hides the rest when you just want to check on what is active.
+    </p>
+    <p>
       When a site becomes available, you'll be notified immediately. If the same site stays available, you'll get
       a reminder every 15 minutes. If a site disappears and comes back, you'll be re-alerted right away.
+    </p>
+
+    <div class="guide-callout">
+      <h3>&#128336; Monitors stop themselves</h3>
+      <p>
+        About a day and a half after your trip window has passed, a monitor stops on its own rather
+        than polling into the past. You will see it as <strong>stopped</strong> on the dashboard with
+        no action needed.
+      </p>
+    </div>
+  </div>
+
+  <!-- Favorites -->
+  <div class="guide-section">
+    <h2><span class="section-icon">&#11088;</span> Favorites</h2>
+    <p>
+      If you watch the same places repeatedly, save the selection as a <strong>favorite</strong>.
+      In step 2 of the wizard, once you have picked your facilities, click
+      <strong>Save as favorite</strong> and give it a name.
+    </p>
+    <p>
+      Favorites appear at the top of your dashboard. Clicking one opens the wizard with those
+      facilities already chosen, so you go straight to picking dates. They are private to your
+      account.
     </p>
   </div>
 
@@ -110,8 +160,8 @@
   <div class="guide-section">
     <h2><span class="section-icon">&#11088;</span> Tips for success</h2>
     <ul>
-      <li>Monitor multiple campgrounds in a single monitor — the wizard lets you check several facilities at once.</li>
-      <li>Create separate monitors for different date ranges to cover backup weekends.</li>
+      <li>Watch several campgrounds at once in a single monitor — just not campgrounds and permits together.</li>
+      <li>Cover backup weekends with separate monitors. <strong>Clone</strong> makes this quick: clone the original and shift the dates.</li>
       <li>Use the <strong>Test Alert</strong> button after creating a monitor to confirm notifications are working before you rely on them.</li>
       <li>Check <strong>Logs</strong> periodically to make sure the monitor isn't hitting errors (e.g. recreation.gov rate limiting).</li>
       <li>Seasonal campgrounds (like those on Tioga Road in Yosemite) won't show availability until their opening dates are announced. The monitor handles this gracefully — no errors, just "no availability".</li>

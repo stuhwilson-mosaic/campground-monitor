@@ -18,6 +18,16 @@
     {% if m.facilities %}
       {% for f in m.facilities %}
         <span class="status-badge stopped" style="margin-right:.2rem">{{ f.name }}</span>
+        {# Permits are booked per trailhead, so the trailhead is the thing you
+           actually need to recognise. Names are stored on the monitor at
+           creation; older monitors fall back to the raw division id. #}
+        {% if f.division_ids %}
+          <span class="trailhead-list">
+            {%- for div_id in f.division_ids -%}
+              {{ ", " if not loop.first else "" }}{{ (f.division_names | default({})).get(div_id, div_id) }}
+            {%- endfor -%}
+          </span>
+        {% endif %}
       {% endfor %}
     {% elif m.facility_name %}
       <span class="status-badge stopped">{{ m.facility_name }}</span>
@@ -56,21 +66,12 @@
   </div>
   {% endif %}
 
+  {# The primary action stays inline; everything else collapses into a menu.
+     <details> rather than a JS dropdown: no click-outside handling, no z-index
+     bugs, keyboard accessible for free. The card is re-rendered by HTMX after
+     start/stop, so the menu closing on those is expected. #}
   <div class="monitor-card-actions mt-2">
     {% if status == "running" %}
-      <button class="btn btn-sm btn-outline-primary"
-              hx-post="/api/monitors/{{ m.id }}/pause"
-              hx-target="#monitor-{{ m.id }}"
-              hx-swap="outerHTML">Pause</button>
-      <button class="btn btn-sm btn-outline-primary"
-              hx-post="/api/monitors/{{ m.id }}/stop"
-              hx-target="#monitor-{{ m.id }}"
-              hx-swap="outerHTML">Stop</button>
-    {% elif status == "paused" %}
-      <button class="btn btn-sm btn-primary"
-              hx-post="/api/monitors/{{ m.id }}/start"
-              hx-target="#monitor-{{ m.id }}"
-              hx-swap="outerHTML">Resume</button>
       <button class="btn btn-sm btn-outline-primary"
               hx-post="/api/monitors/{{ m.id }}/stop"
               hx-target="#monitor-{{ m.id }}"
@@ -81,23 +82,28 @@
               hx-target="#monitor-{{ m.id }}"
               hx-swap="outerHTML">Start</button>
     {% endif %}
-    {% if m.status == "running" %}
-    <button class="btn btn-sm btn-outline-secondary" disabled
-            title="Stop the monitor first to edit its dates">Edit</button>
-    {% else %}
-    <a href="/monitors/{{ m.id }}/edit" class="btn btn-sm btn-outline-secondary">Edit</a>
-    {% endif %}
-    <a href="/monitors/new?from={{ m.id }}" class="btn btn-sm btn-outline-secondary"
-       title="Start a new monitor from this one's facilities and dates">Clone</a>
-    <a href="/logs/{{ m.id }}" class="btn btn-sm btn-outline-secondary">Logs</a>
-    <button class="btn btn-sm btn-outline-secondary"
-            hx-post="/api/monitors/{{ m.id }}/test-alert"
-            hx-swap="none"
-            onclick="this.textContent='Sending...'; this.disabled=true; fetch('/api/monitors/{{ m.id }}/test-alert', {method:'POST'}).then(r=>r.json()).then(d=>{let msgs=[]; if(d.ntfy!==undefined) msgs.push('ntfy: '+(d.ntfy?'sent':'failed')); if(d.email!==undefined) msgs.push('email: '+(d.email?'sent':'failed')); alert(msgs.join(', ')||'No channels configured'); this.textContent='Test Alert'; this.disabled=false;}).catch(()=>{alert('Request failed'); this.textContent='Test Alert'; this.disabled=false;})">Test Alert</button>
-    <button class="btn btn-sm btn-outline-danger"
-            hx-delete="/api/monitors/{{ m.id }}"
-            hx-target="#monitor-{{ m.id }}"
-            hx-swap="outerHTML"
-            hx-confirm="Delete this monitor?">Delete</button>
+
+    <details class="card-menu">
+      <summary class="btn btn-sm btn-outline-secondary card-menu-toggle"
+               title="More actions" aria-label="More actions">&#8943;</summary>
+      <div class="card-menu-items">
+        {% if status == "running" %}
+        <button class="card-menu-item" disabled
+                title="Stop the monitor first to edit it">Edit</button>
+        {% else %}
+        <a href="/monitors/{{ m.id }}/edit" class="card-menu-item">Edit</a>
+        {% endif %}
+        <a href="/monitors/new?from={{ m.id }}" class="card-menu-item"
+           title="Start a new monitor from this one's settings">Clone</a>
+        <a href="/logs/{{ m.id }}" class="card-menu-item">Logs</a>
+        <button class="card-menu-item"
+                onclick="testAlert(this, '{{ m.id }}')">Test Alert</button>
+        <button class="card-menu-item card-menu-item-danger"
+                hx-delete="/api/monitors/{{ m.id }}"
+                hx-target="#monitor-{{ m.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Delete this monitor?">Delete</button>
+      </div>
+    </details>
   </div>
 </div>

@@ -14,14 +14,26 @@
     <div class="summary-label">Running</div>
   </div>
   <div class="summary-card">
-    <div class="summary-value val-paused">{{ paused_count }}</div>
-    <div class="summary-label">Paused</div>
+    <div class="summary-value val-paused">{{ stopped_count }}</div>
+    <div class="summary-label">Stopped</div>
   </div>
   <div class="summary-card">
-    <div class="summary-value val-total">{{ monitors | length }}</div>
+    {# total_count, not `monitors | length`: the list is filtered, the counts
+       describe everything the user owns. #}
+    <div class="summary-value val-total">{{ total_count }}</div>
     <div class="summary-label">Total</div>
   </div>
 </div>
+
+{% if total_count %}
+<div class="dash-filter">
+  {# A query param rather than localStorage: survives a refresh, is linkable,
+     and stays visible to the server so it cannot desync from the HTMX card
+     swaps. #}
+  <a href="/dashboard" class="btn btn-sm {{ 'btn-primary' if not running_only else 'btn-outline-primary' }}">All</a>
+  <a href="/dashboard?running=1" class="btn btn-sm {{ 'btn-primary' if running_only else 'btn-outline-primary' }}">Running only</a>
+</div>
+{% endif %}
 
 {# Saved facility selections. Deliberately OUTSIDE the "has monitors" branch:
    they matter most to someone with an empty dashboard, who can start a monitor
@@ -54,6 +66,15 @@
     {% include "partials/monitor_card.html" %}
   {% endfor %}
 </div>
+{% elif running_only %}
+{# Filtered to nothing is a different situation from having nothing, and
+   offering "create your first monitor" to someone with 6 stopped ones is
+   just confusing. #}
+<div class="empty-state">
+  <div class="empty-state-icon">&#9199;</div>
+  <p>No monitors are running right now.</p>
+  <a href="/dashboard" class="btn btn-primary">Show all {{ total_count }}</a>
+</div>
 {% else %}
 <div class="empty-state">
   <div class="empty-state-icon">&#9978;</div>
@@ -62,4 +83,25 @@
   <p class="mt-3"><a href="/guide" style="font-size: .85rem;">Read the guide</a> to learn how it works.</p>
 </div>
 {% endif %}
+
+<script>
+// Lifted out of an inline onclick on the card so the card partial stays
+// readable. Lives on the dashboard rather than in the partial, because HTMX
+// swaps the card back into this page and would otherwise re-declare it.
+function testAlert(btn, monitorId) {
+  var original = btn.textContent;
+  btn.textContent = "Sending...";
+  btn.disabled = true;
+  fetch("/api/monitors/" + encodeURIComponent(monitorId) + "/test-alert", { method: "POST" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var msgs = [];
+      if (d.ntfy !== undefined)  msgs.push("ntfy: "  + (d.ntfy  ? "sent" : "failed"));
+      if (d.email !== undefined) msgs.push("email: " + (d.email ? "sent" : "failed"));
+      alert(msgs.join(", ") || "No channels configured");
+    })
+    .catch(function () { alert("Request failed"); })
+    .finally(function () { btn.textContent = original; btn.disabled = false; });
+}
+</script>
 {% endblock %}

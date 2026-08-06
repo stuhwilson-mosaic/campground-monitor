@@ -66,3 +66,61 @@
             onclick="goToStep2()">Next &rarr;</button>
   </div>
 </div>
+
+<script>
+// Restore a seeded or back-navigated selection.
+//
+// Cloning lands here with state/org/rec_area already known (state and org are
+// derived from the catalog, since a monitor never stored them). Reselecting
+// the dropdowns is not enough on its own: the agency list and the park list
+// are both loaded by HTMX, so each has to be fetched in turn before the next
+// can be set.
+(function restoreStep1() {
+  var stateEl = document.getElementById("state-select");
+  var agencyEl = document.getElementById("agency-select");
+  if (!stateEl || !wizardData.state) {
+    if (wizardData.rec_area_id) showSelectedRecArea();
+    return;
+  }
+
+  stateEl.value = wizardData.state;
+  if (!wizardData.org) { if (wizardData.rec_area_id) showSelectedRecArea(); return; }
+
+  // Load agencies for the state, then select ours, then load its parks.
+  htmx.ajax("GET", "/api/agencies?state=" + encodeURIComponent(wizardData.state),
+    { target: "#agency-select", swap: "innerHTML" }
+  ).then(function () {
+    agencyEl.value = wizardData.org;
+    if (agencyEl.value !== wizardData.org) {
+      // The derived agency is not in the list (e.g. state came back "Other").
+      // Leave step 1 for the user to pick rather than guessing.
+      showSelectedRecArea();
+      return;
+    }
+    return htmx.ajax("GET",
+      "/api/rec-areas?state=" + encodeURIComponent(wizardData.state)
+        + "&org=" + encodeURIComponent(wizardData.org),
+      { target: "#rec-area-results", swap: "innerHTML" }
+    ).then(function () {
+      var row = document.querySelector(
+        '.rec-area-item[data-rec-area-id="' + wizardData.rec_area_id + '"]');
+      if (row) row.classList.add("selected");
+      showSelectedRecArea();
+    });
+  });
+})();
+
+function showSelectedRecArea() {
+  // The park is already chosen, so surface it and unblock Next even when the
+  // list above could not be reproduced.
+  if (!wizardData.rec_area_id) return;
+  var display = document.getElementById("selected-rec-area");
+  if (display) {
+    display.textContent = wizardData.rec_area_name || "";
+    var container = display.closest(".selected-rec-area-container");
+    if (container) container.style.display = "block";
+  }
+  var nextBtn = document.getElementById("step1-next-btn");
+  if (nextBtn) nextBtn.disabled = false;
+}
+</script>

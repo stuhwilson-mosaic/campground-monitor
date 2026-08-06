@@ -24,7 +24,7 @@
     <select id="event" name="event" class="form-control">
       <option value="">All events</option>
       {% for e in ["login", "logout", "monitor.create", "monitor.start",
-                   "monitor.pause", "monitor.stop", "monitor.edit", "monitor.delete"] %}
+                   "monitor.stop", "monitor.edit", "monitor.delete"] %}
       <option value="{{ e }}" {{ 'selected' if filter_event == e else '' }}>{{ e }}</option>
       {% endfor %}
     </select>

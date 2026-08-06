@@ -76,6 +76,9 @@ var wizardData = {
   ntfy_topic: "",
   email_to: "",
   selected_divisions: {},  // {facility_id: [div_id, ...]}
+  // {facility_id: {div_id: "Young Lakes via Dog Lake"}} — stored on the monitor
+  // so the dashboard can name trailheads without calling the permit API.
+  selected_division_names: {},
 };
 
 // Overlay the seed, if any. Only keys actually present in the seed are
@@ -243,11 +246,37 @@ function restoreFacilityChecks() {
 }
 
 document.addEventListener("htmx:afterSwap", function(evt) {
-  if (evt.target && evt.target.id === "facility-list") {
+  if (!evt.target || !evt.target.id) return;
+
+  if (evt.target.id === "facility-list") {
     restoreFacilityChecks();
     applyTypeLock();
+    reopenDivisionPickers();
+    return;
+  }
+
+  // A trailhead picker just loaded (cloning, or re-opening one). Re-check the
+  // trailheads already in wizardData; the markup arrives unchecked.
+  if (evt.target.id.indexOf("divisions-") === 0) {
+    var facilityId = evt.target.id.slice("divisions-".length);
+    var chosen = (wizardData.selected_divisions || {})[facilityId] || [];
+    if (!chosen.length) return;
+    evt.target.querySelectorAll('input[type="checkbox"][value]')
+      .forEach(function (cb) { cb.checked = chosen.indexOf(cb.value) !== -1; });
   }
 });
+
+function reopenDivisionPickers() {
+  // Permit trailheads normally appear when you tick the facility. On a clone
+  // the facility is already ticked, so nothing triggers the picker and the
+  // selected trailheads would be invisible even though they are in the seed.
+  (wizardData.facility_ids || []).forEach(function (fid) {
+    if ((wizardData.facility_types || {})[fid] !== "Permit") return;
+    var cb = document.querySelector(
+      '#facility-list input[type="checkbox"][value="' + fid + '"]');
+    if (cb) showDivisionPicker(cb, fid);
+  });
+}
 
 function saveSelectionAsFavorite() {
   var msg = document.getElementById("save-favorite-msg");
@@ -343,8 +372,20 @@ function updateDivisionSelection(checkbox, facilityId) {
   var arr = wizardData.selected_divisions[facilityId];
   if (checkbox.checked) {
     if (arr.indexOf(divId) === -1) arr.push(divId);
+    // Capture the trailhead NAME as well as its id. The dashboard card shows
+    // the trailhead (a permit facility is always the same generic
+    // "... Wilderness Permits" string), and resolving ids to names there would
+    // mean an outbound API call per card on every render.
+    if (!wizardData.selected_division_names[facilityId]) {
+      wizardData.selected_division_names[facilityId] = {};
+    }
+    wizardData.selected_division_names[facilityId][divId] =
+      checkbox.dataset.name || divId;
   } else {
     wizardData.selected_divisions[facilityId] = arr.filter(function(v) { return v !== divId; });
+    if (wizardData.selected_division_names[facilityId]) {
+      delete wizardData.selected_division_names[facilityId][divId];
+    }
   }
 
   // Update count display

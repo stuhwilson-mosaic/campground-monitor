@@ -1,4 +1,4 @@
-"""API action endpoints — HTMX monitor start/pause/stop/delete + catalog filters."""
+"""API action endpoints — HTMX monitor start/stop/delete + catalog filters."""
 import asyncio
 import uuid
 from datetime import date, datetime
@@ -93,16 +93,6 @@ async def start_monitor(monitor_id: str, request: Request):
     return _card_response(request, monitor_id)
 
 
-@router.post("/monitors/{monitor_id}/pause", response_class=HTMLResponse)
-async def pause_monitor(monitor_id: str, request: Request):
-    user, monitor = require_monitor_access(request, monitor_id)
-    manager = request.app.state.manager
-    await manager.pause_monitor(monitor_id)
-    await audit(request, "monitor.pause", username=user.username,
-                target_id=monitor_id, target_name=monitor.get("name"))
-    return _card_response(request, monitor_id)
-
-
 @router.post("/monitors/{monitor_id}/stop", response_class=HTMLResponse)
 async def stop_monitor(monitor_id: str, request: Request):
     user, monitor = require_monitor_access(request, monitor_id)
@@ -154,6 +144,9 @@ class CreateMonitorRequest(BaseModel):
     nights: Optional[int] = None  # permit-only, metadata only (see below)
     facility_types: dict[str, str] = {}
     selected_divisions: dict[str, list[str]] = {}  # {facility_id: [division_id, ...]}
+    # {facility_id: {division_id: name}} — captured by the wizard's trailhead
+    # picker so the dashboard can name trailheads without an API call.
+    selected_division_names: dict[str, dict[str, str]] = {}
 
     @model_validator(mode="after")
     def _check_type_and_dates(self):
@@ -192,6 +185,9 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
         div_ids = body.selected_divisions.get(fid, [])
         if div_ids:
             fac["division_ids"] = div_ids
+            div_names = body.selected_division_names.get(fid) or {}
+            if div_names:
+                fac["division_names"] = div_names
         facilities.append(fac)
 
     config: dict[str, Any] = {
@@ -248,18 +244,35 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
 # ── Edit a monitor's dates ────────────────────────────────────────────────────
 
 
+# The intervals the wizard offers. Validated against this set rather than
+# accepting any integer: a 1-second interval would hammer recreation.gov, and
+# the May logs already show 429s at 15s.
+ALLOWED_POLL_INTERVALS = [15, 30, 60, 120, 300, 600, 900, 1800]
+
+
 class UpdateDatesRequest(BaseModel):
     check_in: str = ""
     check_out: str = ""
     entry_date: str = ""
     nights: Optional[int] = None
+    poll_interval_seconds: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _check_interval(self):
+        if (self.poll_interval_seconds is not None
+                and self.poll_interval_seconds not in ALLOWED_POLL_INTERVALS):
+            raise ValueError(
+                "Check frequency must be one of: "
+                + ", ".join(str(i) for i in ALLOWED_POLL_INTERVALS)
+            )
+        return self
 
 
 @router.post("/monitors/{monitor_id}/dates")
 async def update_monitor_dates(monitor_id: str, body: UpdateDatesRequest, request: Request):
     """Change an existing monitor's dates.
 
-    Requires the monitor to be stopped or paused. Editing a live monitor was
+    Requires the monitor to be stopped. Editing a live monitor was
     rejected in favour of this: it removes every question about a poll cycle
     running mid-change, at the cost of two extra clicks.
     """
@@ -285,16 +298,18 @@ async def update_monitor_dates(monitor_id: str, body: UpdateDatesRequest, reques
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
 
+    fields: dict[str, Any]
     if kind == "Permit":
-        manager.update_monitor(
-            monitor_id, entry_date=body.entry_date, nights=body.nights,
-            check_in="", check_out="",
-        )
+        fields = {"entry_date": body.entry_date, "nights": body.nights,
+                  "check_in": "", "check_out": ""}
     else:
-        manager.update_monitor(
-            monitor_id, check_in=body.check_in, check_out=body.check_out,
-            entry_date="", nights=None,
-        )
+        fields = {"check_in": body.check_in, "check_out": body.check_out,
+                  "entry_date": "", "nights": None}
+    if body.poll_interval_seconds is not None:
+        # The poll loop re-reads config each cycle, so this applies on the next
+        # tick. Editing is stop-first anyway, so it takes effect on restart.
+        fields["poll_interval_seconds"] = body.poll_interval_seconds
+    manager.update_monitor(monitor_id, **fields)
 
     # The dedup ledger refers to the old date window; keeping it would suppress
     # the first alert under the new dates.

@@ -1407,3 +1407,71 @@ details[open] > .log-summary::before { content: "\25BE"; }
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+/* ── Monitor card action menu ─────────────────────────────────────────────── */
+/* Secondary actions collapse behind a single toggle so the card is not
+   dominated by six buttons. <details> avoids click-outside and z-index
+   handling and is keyboard accessible without extra work. */
+.monitor-card-actions { display: flex; align-items: center; gap: .4rem; }
+.card-menu { position: relative; }
+.card-menu-toggle {
+    list-style: none;
+    cursor: pointer;
+    letter-spacing: .05em;
+    line-height: 1;
+}
+.card-menu-toggle::-webkit-details-marker { display: none; }
+.card-menu-items {
+    position: absolute;
+    right: 0;
+    top: calc(100% + .25rem);
+    z-index: 20;
+    min-width: 9rem;
+    display: flex;
+    flex-direction: column;
+    background: var(--white, #fff);
+    border: 1px solid var(--border, #D2DAD4);
+    border-radius: var(--radius-sm, 6px);
+    box-shadow: var(--shadow-md, 0 4px 14px rgba(13,31,23,.08));
+    overflow: hidden;
+}
+.card-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: .6rem .8rem;      /* 44px tap target with the font size */
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: .85rem;
+    color: var(--text-700, #374842);
+    cursor: pointer;
+    text-decoration: none;
+}
+.card-menu-item:hover:not([disabled]) {
+    background: var(--pine-50, #F0F9F4);
+    text-decoration: none;
+}
+.card-menu-item[disabled] { opacity: .45; cursor: not-allowed; }
+.card-menu-item-danger { color: var(--clay-600, #9B2C2C); }
+.card-menu-item-danger:hover { background: var(--clay-100, #FDE8E8); }
+
+/* Trailheads matter more than the permit facility name, which is always the
+   same generic "... Wilderness Permits" string. */
+.trailhead-list {
+    display: inline;
+    font-size: .82rem;
+    color: var(--text-500, #5A6E66);
+}
+
+.dash-filter { display: flex; gap: .4rem; margin-bottom: 1rem; }
+
+.edit-section-title {
+    font-family: var(--font-display, inherit);
+    font-size: 1rem;
+    color: var(--pine-800, #163328);
+    margin: 0 0 1rem;
+}
+/* The reference block must not read as a form. */
+.edit-reference { background: var(--sand-100, #F5F3ED); }
+.edit-reference dd { margin-bottom: .5rem; }

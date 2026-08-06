@@ -40,7 +40,7 @@
   <div class="wizard-nav">
     <button class="btn btn-outline" onclick="goToStep4Back()">&larr; Back</button>
     <div class="wizard-nav-actions">
-      <button class="btn btn-outline" onclick="createMonitor(false)">Create Paused</button>
+      <button class="btn btn-outline" onclick="createMonitor(false)">Create Stopped</button>
       <button class="btn btn-primary" onclick="createMonitor(true)">Create &amp; Start</button>
     </div>
   </div>
@@ -135,6 +135,7 @@ function createMonitor(start) {
     facility_names: facilityNamesMap,
     facility_types: wizardData.facility_types || {},
     selected_divisions: wizardData.selected_divisions || {},
+    selected_division_names: wizardData.selected_division_names || {},
     check_in: wizardData.check_in || "",
     check_out: wizardData.check_out || "",
     entry_date: wizardData.entry_date || "",

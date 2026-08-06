@@ -9,19 +9,52 @@ from app.auth import get_current_user, get_current_user_record, require_monitor_
 router = APIRouter()
 
 
-def seed_from_monitor(monitor: dict) -> dict:
+def derive_location(catalog, facility_ids: list[str]) -> dict:
+    """Recover the state/agency/rec-area a monitor's facilities belong to.
+
+    A monitor stores only rec_area_name and facility ids, never the state or
+    org that step 1 selects. Cloning has to walk step 1, so those are looked up
+    from the catalog instead of being stored.
+
+    Degrades on purpose: facilities with no address row carry state "Other"
+    (87 of 149 permits in the current export), and a facility missing from the
+    catalog yields nothing at all. In both cases step 1 simply opens
+    unselected rather than erroring.
+    """
+    if catalog is None:
+        return {}
+    for fid in facility_ids:
+        row = getattr(catalog, "_facilities", {}).get(fid)
+        if not row:
+            continue
+        found = {}
+        if row.get("_state"):
+            found["state"] = row["_state"]
+        if row.get("_org_id"):
+            found["org"] = row["_org_id"]
+        rec_area_id = row.get("ParentRecAreaID")
+        if rec_area_id:
+            found["rec_area_id"] = rec_area_id
+        if found:
+            return found
+    return {}
+
+
+def seed_from_monitor(monitor: dict, catalog=None) -> dict:
     """Build wizard prefill state from an existing monitor.
 
     Dates are carried over deliberately: cloning is overwhelmingly used to
     shift a window by a day or two, so an editable starting value beats an
     empty field.
 
-    Pure function over a dict, so it is testable without HTTP.
+    Pure function over a dict (plus an optional catalog for location lookup),
+    so it is testable without HTTP.
     """
     facilities = monitor.get("facilities") or []
     facility_ids = [f["id"] for f in facilities if f.get("id")]
 
     return {
+        **derive_location(catalog, facility_ids),
         "rec_area_name": monitor.get("rec_area_name", ""),
         "facility_ids": facility_ids,
         # Both keyed by facility id, matching the wizard's internal shape.
@@ -30,6 +63,10 @@ def seed_from_monitor(monitor: dict) -> dict:
         "selected_divisions": {
             f["id"]: f["division_ids"] for f in facilities
             if f.get("id") and f.get("division_ids")
+        },
+        "selected_division_names": {
+            f["id"]: f["division_names"] for f in facilities
+            if f.get("id") and f.get("division_names")
         },
         "name": f"{monitor.get('name', 'Monitor')} copy",
         "check_in": monitor.get("check_in", ""),
@@ -62,6 +99,10 @@ def seed_from_favorite(favorite: dict) -> dict:
             f["id"]: f["division_ids"] for f in facilities
             if f.get("id") and f.get("division_ids")
         },
+        "selected_division_names": {
+            f["id"]: f["division_names"] for f in facilities
+            if f.get("id") and f.get("division_names")
+        },
     }
 
 
@@ -87,8 +128,9 @@ async def wizard_new(request: Request):
     """Render the wizard shell.
 
     With no query params this is the plain 5-step flow starting at step 1.
-    `?from=<monitor_id>` clones an existing monitor: the facility selection is
-    already settled, so it opens at step 3 (dates) with everything prefilled.
+    `?from=<monitor_id>` clones an existing monitor: same 5 steps, every field
+    prefilled, so nothing is created without being reviewed.
+    `?favorite=<id>` opens at step 3, since a favorite is a settled selection.
     """
     user = get_current_user(request)
     if not user:
@@ -114,8 +156,12 @@ async def wizard_new(request: Request):
             # user into an empty wizard instead.
             monitor = None
         if monitor:
-            seed = seed_from_monitor(monitor)
-            start_step = 3
+            # Clone walks the whole wizard from step 1 with every field
+            # prefilled, so the user can review and change anything before
+            # creating. Favorites still jump to step 3, since a favorite is a
+            # selection that has already been settled.
+            seed = seed_from_monitor(monitor, catalog)
+            start_step = 1
 
     favorite_id = request.query_params.get("favorite", "")
     if favorite_id and not seed:

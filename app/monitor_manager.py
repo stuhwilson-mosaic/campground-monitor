@@ -59,16 +59,12 @@ class MonitorManager:
         self._data_dir = data_dir
         self._path = os.path.join(data_dir, "monitors.json")
         self._tasks: dict[str, asyncio.Task] = {}
-        self._paused: set[str] = set()
         # Notified sites per monitor: monitor_id -> {(facility_id, site_id): notified_epoch}
         self._notified: dict[str, dict[tuple[str, str], float]] = {}
         # Track start time for runtime calculation: monitor_id -> epoch
         self._start_times: dict[str, float] = {}
         # Re-alert after this many seconds even if site is still available
         self.notify_cooldown_seconds = 15 * 60  # 15 minutes
-        # How often a paused loop wakes to re-check the pause flag. This is the
-        # upper bound on how long Resume takes to visibly take effect.
-        self.pause_poll_seconds = 5
         # Per-monitor check log: monitor_id -> deque of log entries (newest first)
         self._check_logs: dict[str, deque[dict]] = {}
         self._max_log_entries = 20
@@ -76,6 +72,26 @@ class MonitorManager:
         os.makedirs(data_dir, exist_ok=True)
         if not os.path.exists(self._path):
             self._write({"monitors": []})
+        self._normalize_retired_statuses()
+
+    def _normalize_retired_statuses(self) -> None:
+        """Rewrite any leftover "paused" status as "stopped".
+
+        Pause was removed: it left the task alive but did not stop the runtime
+        clock, could not be resumed from the UI, and was indistinguishable from
+        stopped after a restart anyway (the flag was in-memory and resume_all
+        only restarts "running"). Monitors saved before the removal can still
+        carry the old status, and leaving it there would mean the file holds a
+        state the code no longer understands.
+        """
+        data = self._read()
+        changed = [m for m in data["monitors"] if m.get("status") == "paused"]
+        if not changed:
+            return
+        for m in changed:
+            m["status"] = "stopped"
+        self._write(data)
+        log.info("normalized %d monitor(s) from paused to stopped", len(changed))
 
     # ── Internal I/O ──────────────────────────────────────────────────────────
 
@@ -181,7 +197,6 @@ class MonitorManager:
         self._notified.pop(monitor_id, None)
         self._check_logs.pop(monitor_id, None)
         self._start_times.pop(monitor_id, None)
-        self._paused.discard(monitor_id)
 
     # ── Async Task Lifecycle ──────────────────────────────────────────────────
 
@@ -196,12 +211,6 @@ class MonitorManager:
             log.error("start_monitor: monitor %s not found", monitor_id)
             return
 
-        # Clearing the pause flag and restoring status MUST happen before the
-        # "already running" early return. pause_monitor leaves the task alive in
-        # _tasks, so a paused monitor always takes that early return: doing the
-        # discard afterwards made Resume a no-op, and the only ways out were
-        # Stop-then-Start or a container restart (which drops the in-memory set).
-        self._paused.discard(monitor_id)
 
         already_running = (
             monitor_id in self._tasks and not self._tasks[monitor_id].done()
@@ -216,18 +225,13 @@ class MonitorManager:
         self.update_monitor(monitor_id, status="running", stats=stats)
 
         if already_running:
-            return  # Task is alive and now unpaused; nothing more to do.
+            return  # Task is already alive; nothing more to do.
 
         task = asyncio.create_task(
             self._poll_loop(monitor_id),
             name=f"poll-{monitor_id}",
         )
         self._tasks[monitor_id] = task
-
-    async def pause_monitor(self, monitor_id: str) -> None:
-        """Pause a running monitor (skips check cycles, stays alive)."""
-        self._paused.add(monitor_id)
-        self.update_monitor(monitor_id, status="paused")
 
     async def stop_monitor(self, monitor_id: str, *, preserve_status: bool = False) -> None:
         """Cancel the poll task.
@@ -245,7 +249,6 @@ class MonitorManager:
                 await task
             except asyncio.CancelledError:
                 pass
-        self._paused.discard(monitor_id)
 
         # Accumulate runtime
         monitor = self.get_monitor(monitor_id)
@@ -407,9 +410,8 @@ class MonitorManager:
                 log.warning("_poll_loop: monitor %s disappeared, stopping loop", monitor_id)
                 return
 
-            # Expiry is evaluated BEFORE the pause check on purpose. When pause
-            # came first it `continue`d, so a paused monitor whose trip window
-            # had passed never reached this and lingered forever.
+            # Evaluated before any work each cycle so a monitor whose trip
+            # window has passed stops itself rather than polling into the past.
             if _trip_window_expired(config):
                 log.info(
                     "_poll_loop: monitor %s trip window ended >%dh ago, auto-stopping",
@@ -425,10 +427,6 @@ class MonitorManager:
                     {"cause": "trip window expired"},
                 )
                 return
-
-            if monitor_id in self._paused:
-                await asyncio.sleep(self.pause_poll_seconds)
-                continue
 
             await self._run_check(config)
 

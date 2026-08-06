@@ -1,13 +1,16 @@
 {% extends "base.html" %}
+{% block title %}Edit — {{ monitor.name }} — Campground Monitor{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1 class="page-title">Edit dates</h1>
+  <h1 class="page-title">Edit monitor</h1>
   <p class="page-subtitle">{{ monitor.name }}</p>
 </div>
 
 <div class="card">
-  {# Only the dates are editable. Facilities and notification settings are
-     deliberately out of scope: changing those is what Clone is for. #}
+  <h2 class="edit-section-title">Editable</h2>
+
+  {# Only dates and frequency. Changing facilities means a different monitor,
+     which is what Clone is for. #}
   {% if is_permit %}
   <div class="form-row">
     <div class="form-group">
@@ -34,19 +37,80 @@
   </div>
   {% endif %}
 
-  <p id="edit-error" class="form-hint" style="color: var(--danger-600, #b4413a);"></p>
+  <div class="form-group">
+    <label for="poll-interval" class="form-label">Check every</label>
+    {% set current_iv = monitor.poll_interval_seconds | default(300) %}
+    <select id="poll-interval" class="form-control">
+      {% for secs, label in [(15, "15 seconds"), (30, "30 seconds"), (60, "1 minute"),
+                             (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"),
+                             (900, "15 minutes"), (1800, "30 minutes")] %}
+      <option value="{{ secs }}"{% if current_iv == secs %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <p class="form-hint">
+      Frequent checks find openings sooner but risk rate limiting from
+      recreation.gov.
+    </p>
+  </div>
+
+  <p id="edit-error" class="form-hint" style="color: var(--clay-600, #9B2C2C);"></p>
 
   <div class="wizard-nav">
     <a href="/dashboard" class="btn btn-outline">Cancel</a>
-    <button id="save-btn" class="btn btn-primary" onclick="saveDates()">Save dates</button>
+    <button id="save-btn" class="btn btn-primary" onclick="saveEdits()">Save changes</button>
   </div>
+</div>
+
+{# Reference only. Shown because it is hard to sensibly pick dates without
+   remembering what the monitor actually watches. #}
+<div class="card mt-3 edit-reference">
+  <h2 class="edit-section-title">For reference &mdash; not editable here</h2>
+  <dl class="review-dl">
+    <dt>Park</dt>
+    <dd>{{ monitor.rec_area_name | default("(none)") }}</dd>
+
+    <dt>{{ "Permit" if is_permit else "Campground" }}{{ "s" if (monitor.facilities | length) != 1 else "" }}</dt>
+    <dd>
+      {% for f in monitor.facilities %}
+        <div>
+          {{ f.name }}
+          {% if f.division_ids %}
+            <div class="trailhead-list">
+              {%- for div_id in f.division_ids -%}
+                {{ ", " if not loop.first else "" }}{{ (f.division_names | default({})).get(div_id, div_id) }}
+              {%- endfor -%}
+            </div>
+          {% endif %}
+        </div>
+      {% else %}
+        <div>(none)</div>
+      {% endfor %}
+    </dd>
+
+    {% if is_permit %}
+    <dt>Party size</dt>
+    <dd>{{ monitor.party_size | default(1) }}</dd>
+    {% endif %}
+
+    <dt>Notifications</dt>
+    <dd>
+      {% if monitor.enable_ntfy %}<div>Push (ntfy): {{ monitor.ntfy_topic | default("(no topic)") }}</div>{% endif %}
+      {% if monitor.enable_email %}<div>Email: {{ monitor.email_to | default("(no address)") }}</div>{% endif %}
+      {% if not monitor.enable_ntfy and not monitor.enable_email %}<div>None configured</div>{% endif %}
+    </dd>
+  </dl>
+  <p class="form-hint">
+    To change the park, facilities or notifications, use
+    <a href="/monitors/new?from={{ monitor.id }}">Clone</a> to build a new
+    monitor from this one.
+  </p>
 </div>
 
 <script>
 var IS_PERMIT = {{ 'true' if is_permit else 'false' }};
 var MONITOR_ID = {{ monitor.id | tojson }};
 
-function saveDates() {
+function saveEdits() {
   var err = document.getElementById("edit-error");
   var btn = document.getElementById("save-btn");
   err.textContent = "";
@@ -56,6 +120,8 @@ function saveDates() {
         nights: parseInt(document.getElementById("nights").value, 10) || null }
     : { check_in: document.getElementById("check-in").value,
         check_out: document.getElementById("check-out").value };
+  payload.poll_interval_seconds =
+    parseInt(document.getElementById("poll-interval").value, 10);
 
   btn.disabled = true;
   fetch("/api/monitors/" + encodeURIComponent(MONITOR_ID) + "/dates", {
