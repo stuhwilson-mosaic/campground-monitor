@@ -1576,3 +1576,35 @@ details[open] > .log-summary::before { content: "\25BE"; }
     gap: .4rem;
     flex-shrink: 0;
 }
+
+/* ── Card title truncation ────────────────────────────────────────────────── */
+/* With two controls in the header, a long name used to wrap and make card
+   heights ragged. Truncate instead.
+   min-width:0 on both the flex item and the text is the load-bearing part:
+   flex items default to min-width:auto, which refuses to shrink below content
+   size, so text-overflow never triggers without it. */
+.monitor-card-title {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.monitor-card-name {
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    min-width: 0;
+}
+.monitor-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The chip is short and identifies the owner; never sacrifice it to the name. */
+.monitor-card-name > .owner-chip { flex-shrink: 0; }
+
+/* A grid item's automatic minimum is its min-content width. Since the card
+   title is now `white-space: nowrap`, min-content became the ENTIRE unbroken
+   name (measured at 709px for a long one), so the 1fr track refused to shrink
+   and the whole card overflowed a 387px viewport by 339px. Same trap as flex
+   items, one level up. */
+.monitor-card { min-width: 0; }

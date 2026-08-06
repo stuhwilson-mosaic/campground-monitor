@@ -3,8 +3,14 @@
 {% set stats = m.stats | default({}) %}
 <div id="monitor-{{ m.id }}" class="monitor-card status-{{ status }}{% if is_past %} past{% endif %}">
   <div class="monitor-card-header">
-    <div>
-      <div class="monitor-card-name">{{ m.name | default("Unnamed Monitor") }}{% include "partials/owner_chip.html" %}</div>
+    <div class="monitor-card-title">
+      {# The name truncates; the owner chip must not. Hence the inner span:
+         ellipsis applies to the text only, and title= keeps the full name
+         available when it is cut. #}
+      <div class="monitor-card-name">
+        <span class="monitor-name-text"
+              title="{{ m.name | default('Unnamed Monitor') }}">{{ m.name | default("Unnamed Monitor") }}</span>{% include "partials/owner_chip.html" %}
+      </div>
       {% if m.rec_area %}
         <div class="monitor-card-meta" style="margin-bottom:.25rem">{{ m.rec_area }}</div>
       {% elif m.rec_area_name %}
