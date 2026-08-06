@@ -105,16 +105,24 @@ function setStep(n) {
 }
 
 // ── Step 1: rec area selection ─────────────────────────────────────────────────
-function selectRecArea(id, name) {
+function selectRecArea(id, name, el) {
   wizardData.rec_area_id = id;
   wizardData.rec_area_name = name;
 
-  // Highlight selected item
-  document.querySelectorAll(".rec-area-item").forEach(function(el) {
-    el.classList.remove("selected");
+  // Highlight selected item.
+  //
+  // The clicked element is passed in explicitly. This used to read the
+  // implicit global `event` and use event.currentTarget, which worked only
+  // because the call came from an inline onclick on the row itself. Once the
+  // handler moved to a delegated listener on `document`, currentTarget became
+  // `document`, whose .classList is undefined, so this threw a TypeError
+  // before reaching the "enable Next" block below and clicking a park did
+  // nothing at all.
+  document.querySelectorAll(".rec-area-item").forEach(function(item) {
+    item.classList.remove("selected");
   });
-  if (event && event.currentTarget) {
-    event.currentTarget.classList.add("selected");
+  if (el && el.classList) {
+    el.classList.add("selected");
   }
 
   // Show selected display — use textContent to prevent XSS
@@ -286,7 +294,7 @@ function saveSelectionAsFavorite() {
 document.addEventListener("click", function(evt) {
   var row = evt.target.closest ? evt.target.closest(".rec-area-item") : null;
   if (!row || !row.dataset.recAreaId) return;
-  selectRecArea(row.dataset.recAreaId, row.dataset.recAreaName || "");
+  selectRecArea(row.dataset.recAreaId, row.dataset.recAreaName || "", row);
 });
 
 function showDivisionPicker(checkbox, facilityId) {
