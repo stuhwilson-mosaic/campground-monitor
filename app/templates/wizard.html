@@ -187,15 +187,24 @@ function updateFacilitySelection(checkbox) {
     var countEl = document.getElementById("div-count-" + id);
     if (countEl) countEl.remove();
   }
+  syncStep2Controls();
+  applyTypeLock();
+}
+
+function syncStep2Controls() {
+  // Kept out of updateFacilitySelection so the restore path can call it too.
+  // Ticking a checkbox in code does not fire onchange, so a cloned monitor
+  // arrived at step 2 with its facilities selected but Next still disabled,
+  // which made it impossible to get past the step.
+  var count = (wizardData.facility_ids || []).length;
   var selCountEl = document.getElementById("selected-facility-count");
   if (selCountEl) {
-    selCountEl.textContent = wizardData.facility_ids.length + " selected";
+    selCountEl.textContent = count + " selected";
   }
   var nextBtn = document.getElementById("step2-next-btn");
   if (nextBtn) {
-    nextBtn.disabled = wizardData.facility_ids.length === 0;
+    nextBtn.disabled = count === 0;
   }
-  applyTypeLock();
 }
 
 // ── Single facility type per monitor ──────────────────────────────────────────
@@ -243,6 +252,9 @@ function restoreFacilityChecks() {
   var ids = wizardData.facility_ids || [];
   document.querySelectorAll('#facility-list input[type="checkbox"][value]')
     .forEach(function(cb) { cb.checked = ids.indexOf(cb.value) !== -1; });
+  // The count and the Next button reflect wizardData, not the DOM, so they
+  // have to be told as well.
+  syncStep2Controls();
 }
 
 document.addEventListener("htmx:afterSwap", function(evt) {
@@ -274,6 +286,7 @@ document.addEventListener("htmx:afterSwap", function(evt) {
         wizardData.selected_division_names[facilityId][cb.value] =
           cb.dataset.name || cb.value;
       });
+    syncDivisionCount(facilityId);
   }
 });
 
@@ -399,8 +412,13 @@ function updateDivisionSelection(checkbox, facilityId) {
     }
   }
 
-  // Update count display
-  var count = wizardData.selected_divisions[facilityId].length;
+  syncDivisionCount(facilityId);
+}
+
+function syncDivisionCount(facilityId) {
+  // Same reason syncStep2Controls exists: the restore path ticks boxes in code,
+  // which fires no onchange, so this label would otherwise stay stale on a clone.
+  var count = (wizardData.selected_divisions[facilityId] || []).length;
   var countEl = document.getElementById("div-count-" + facilityId);
   if (!countEl) {
     var picker = document.getElementById("divisions-" + facilityId);
