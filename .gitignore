@@ -25,8 +25,10 @@ data/telemetry.db*
 /permit_*.json
 /ridb_swagger.yaml
 
-# Local-only — kept out of the shared repo (development docs, AI instructions, tests)
+# Local-only — kept out of the shared repo (development docs, AI instructions).
+# `tests/` and `pytest.ini` were removed from history in the 2026-06-13 scrub and
+# restored 2026-08-13: a collaborator cloning this repo silently got no test
+# suite, so regression tests could not travel with a PR. The duplicate-alert fix
+# (#3) shipped with three tests that were invisible in its diff for that reason.
 CLAUDE.md
-pytest.ini
 docs/
-tests/
