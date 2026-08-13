@@ -28,6 +28,12 @@ log = logging.getLogger(__name__)
 
 _AUTO_STOP_GRACE = timedelta(hours=36)
 
+# Consecutive cycles a site must be absent before it leaves the notified ledger
+# and is allowed to alert again. One missing cycle is noise: recreation.gov
+# drops a site from a response and returns it on the next poll, which used to
+# read as "booked, then released" and re-alerted inside the cooldown.
+_PRUNE_AFTER_MISSES = 2
+
 
 def _trip_window_expired(config: dict, now: datetime | None = None) -> bool:
     """Return True if the monitor's trip window ended more than the grace period ago.
@@ -67,6 +73,9 @@ class MonitorManager:
         self._tasks: dict[str, asyncio.Task] = {}
         # Notified sites per monitor: monitor_id -> {(facility_id, site_id): notified_epoch}
         self._notified: dict[str, dict[tuple[str, str], float]] = {}
+        # Consecutive cycles each notified site has been absent, so a one-off
+        # gap in a response does not retire its ledger entry.
+        self._absent_streak: dict[str, dict[tuple[str, str], int]] = {}
         # Track start time for runtime calculation: monitor_id -> epoch
         self._start_times: dict[str, float] = {}
         # Re-alert after this many seconds even if site is still available
@@ -198,9 +207,11 @@ class MonitorManager:
         Note nothing clears this on stop, so it survives a stop/start cycle.
         """
         self._notified.pop(monitor_id, None)
+        self._absent_streak.pop(monitor_id, None)
 
     def _forget_runtime_state(self, monitor_id: str) -> None:
         self._notified.pop(monitor_id, None)
+        self._absent_streak.pop(monitor_id, None)
         self._check_logs.pop(monitor_id, None)
         self._start_times.pop(monitor_id, None)
 
@@ -535,6 +546,10 @@ class MonitorManager:
 
         # Collect all currently available site keys this cycle for pruning
         currently_available: set[tuple[str, str]] = set()
+        # Facilities that actually answered this cycle. Only these may retire
+        # their own ledger entries below; a facility whose request failed told
+        # us nothing about what is available.
+        answered: set[str] = set()
 
         for i, facility in enumerate(facilities):
             facility_id = facility["id"]
@@ -586,6 +601,7 @@ class MonitorManager:
                 self._append_log(monitor_id, log_entry)
                 continue
 
+            answered.add(facility_id)
             for s in sites:
                 site_key = s.get("division_id") or s.get("site_id")
                 currently_available.add((facility_id, site_key))
@@ -652,10 +668,21 @@ class MonitorManager:
             elif not sites:
                 log.info("  %s: no availability", facility_name)
 
-        # Prune sites that are no longer available (so we re-alert if they come back)
-        stale_keys = [k for k in self._notified[monitor_id] if k not in currently_available]
-        for k in stale_keys:
-            del self._notified[monitor_id][k]
+        # Prune sites that are no longer available (so we re-alert if they come
+        # back), but only on sustained absence and only for facilities that
+        # answered. Pruning on the first miss meant a single dropped site or a
+        # 429 re-armed the alert and fired again inside the cooldown.
+        streaks = self._absent_streak.setdefault(monitor_id, {})
+        for key in list(self._notified[monitor_id]):
+            if key[0] not in answered:
+                continue  # no fresh data for this facility; leave the entry alone
+            if key in currently_available:
+                streaks.pop(key, None)
+                continue
+            streaks[key] = streaks.get(key, 0) + 1
+            if streaks[key] >= _PRUNE_AFTER_MISSES:
+                del self._notified[monitor_id][key]
+                del streaks[key]
 
         if found_any:
             stats["total_alerts"] = stats.get("total_alerts", 0) + 1
