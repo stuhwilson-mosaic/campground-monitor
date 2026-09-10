@@ -40,7 +40,8 @@ There are two interfaces over one shared core:
   persists configs to JSON, dedupes alerts with a cooldown, and runs the auto-stop logic. Sync
   HTTP calls are pushed onto threads (`asyncio.to_thread`) so they don't block the event loop.
 - **`app/monitor_engine.py`** — the recreation.gov integration itself: `check_campground()` and
-  `check_permit()` plus the notification senders (ntfy, email). This is the layer the CLI shares.
+  `check_permit()`, the site-type filter (`SITE_TYPE_FILTERS`, `filter_sites()`, and the cached
+  accessible-site lookup), plus the notification senders (ntfy, email). This is the layer the CLI shares.
 - **`app/ridb.py`** — loads the facility catalog (a CSV export from recreation.gov's RIDB) into
   memory at startup and serves the search/filter queries behind the creation wizard.
 - **`app/auth.py`** + **`app/user_store.py`** — auth. Sessions are signed cookies
@@ -64,7 +65,7 @@ that split runs through the whole codebase:
 |---|---|---|
 | Endpoint | `/api/camps/availability/campground/{id}/month` | `/api/permitinyo/{id}/availabilityv2` |
 | Dates | check-in + check-out (multi-night) | single entry date |
-| Filter | — | party size, optional trailhead/division |
+| Filter | optional `exclude_site_types` (skip hike-to, ADA, group, RV, …) | party size, optional trailhead/division |
 | Result | sites (site id, loop, type) | divisions (remaining vs. total quota) |
 
 A stay spanning two months makes two campground calls and merges them. Permit support targets
@@ -76,10 +77,15 @@ browser-like headers in `config.py`.
 
 1. You create a monitor in the wizard → it's saved to `monitors.json` and an async task starts.
 2. The task polls recreation.gov on the configured interval.
-3. Newly available sites/divisions fire a notification, deduped with a 15-minute cooldown.
-4. A monitor **auto-stops ~36 hours after its trip window ends**, so a forgotten monitor doesn't
+3. For campgrounds, sites whose type is in the monitor's `exclude_site_types` list are dropped
+   first. The keys are recreation.gov `campsite_type` strings slugified (`HIKE TO` → `hike_to`),
+   plus `accessible`, which is a per-site flag fetched once per campground from the campsite
+   search API and only when that key is excluded. An empty list means no filtering.
+4. Newly available sites/divisions fire a notification, deduped with a 15-minute cooldown.
+   Excluded sites never enter the dedup ledger.
+5. A monitor **auto-stops ~36 hours after its trip window ends**, so a forgotten monitor doesn't
    keep polling dates in the past.
-5. On restart, monitors still marked `running` resume via the lifespan hook in `main.py`.
+6. On restart, monitors still marked `running` resume via the lifespan hook in `main.py`.
 
 ## Project layout
 ```
