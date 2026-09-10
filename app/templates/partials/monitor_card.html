@@ -61,7 +61,11 @@
   <div class="monitor-card-meta mb-2">
     {% if m.facilities %}
       {% for f in m.facilities %}
+        {% if f.type | default('Campground') == 'Campground' %}
+        <a class="status-badge stopped" style="margin-right:.2rem" href="/campgrounds/{{ f.id | urlencode }}" title="View availability and map">{{ f.name }} &#8599;</a>
+        {% else %}
         <span class="status-badge stopped" style="margin-right:.2rem">{{ f.name }}</span>
+        {% endif %}
         {# Permits are booked per trailhead, so the trailhead is the thing you
            actually need to recognise. Names are stored on the monitor at
            creation; older monitors fall back to the raw division id. #}

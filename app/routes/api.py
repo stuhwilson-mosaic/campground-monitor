@@ -493,9 +493,10 @@ async def api_facilities(
         return HTMLResponse('<p class="no-facilities">No facilities found.</p>')
     parts = []
     for fac in facilities:
-        fac_id = fac["id"]
-        fac_name = fac["name"]
-        fac_type = fac["type"]
+        fac_id = escape(fac["id"], quote=True)
+        fac_name = escape(fac["name"], quote=True)
+        fac_type = escape(fac["type"], quote=True)
+        parts.append('<div class="facility-browse-row">')
         parts.append(
             f'<label class="facility-item">'
             f'<input type="checkbox" name="facility_ids" value="{fac_id}" '
@@ -504,6 +505,13 @@ async def api_facilities(
             f'{fac_name} <span class="facility-type">({fac_type})</span>'
             f'</label>'
         )
+        if fac_type == "Campground":
+            parts.append(
+                f'<a class="facility-browse-link" href="/campgrounds/{fac_id}" '
+                f'target="_blank" rel="noopener" aria-label="View availability and map for {fac_name}">'
+                f'Availability &amp; map &#8599;</a>'
+            )
+        parts.append('</div>')
     return HTMLResponse("".join(parts))
 
 

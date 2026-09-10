@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.auth import get_current_user, get_current_user_record, require_monitor_access
+from app.availability import validate_dates
 
 router = APIRouter()
 
@@ -172,6 +173,27 @@ async def wizard_new(request: Request):
         if favorite:
             seed = seed_from_favorite(favorite)
             start_step = 3
+
+    campground_id = request.query_params.get("campground", "")
+    if campground_id and not seed:
+        campground = catalog.get_campground(campground_id)
+        if campground is None:
+            raise HTTPException(status_code=404, detail="Campground not found.")
+        try:
+            check_in, check_out = validate_dates(
+                request.query_params.get("check_in", ""), request.query_params.get("check_out", "")
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        seed = {
+            **derive_location(catalog, [campground_id]),
+            "rec_area_name": campground["rec_area_name"],
+            "facility_ids": [campground_id],
+            "facility_names": {campground_id: campground["name"]},
+            "facility_types": {campground_id: "Campground"},
+            "check_in": check_in, "check_out": check_out,
+        }
+        start_step = 3
 
     return _templates(request).TemplateResponse(
         request,

@@ -10,13 +10,14 @@ from fastapi.templating import Jinja2Templates
 
 from app import config
 from app.auth import get_current_user
+from app.availability import AvailabilityService
 from app.monitor_manager import MonitorManager
 from app.ridb import RIDBCatalog
 from app.telemetry import TelemetryStore
 from app.user_store import UserStore
 
 log = logging.getLogger(__name__)
-from app.routes import auth_routes, dashboard, wizard, api, logs, admin
+from app.routes import auth_routes, dashboard, wizard, api, logs, admin, campgrounds
 
 
 def create_app() -> FastAPI:
@@ -96,6 +97,9 @@ def create_app() -> FastAPI:
     app.state.telemetry = telemetry
     app.state.catalog = catalog
     app.state.templates = templates
+    app.state.availability = AvailabilityService()
+    # Browser waiters must not fill the default worker pool used by monitors.
+    app.state.availability_slots = asyncio.Semaphore(4)
 
     app.include_router(auth_routes.router)
     app.include_router(dashboard.router)
@@ -103,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(api.router)
     app.include_router(logs.router)
     app.include_router(admin.router)
+    app.include_router(campgrounds.router)
 
     @app.get("/")
     async def index(request: Request):

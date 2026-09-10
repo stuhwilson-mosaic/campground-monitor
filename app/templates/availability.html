@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}{{ seed.facility.name }} Availability · Campground Monitor{% endblock %}
+{% block main_class %}availability-main{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/static/availability.css?v=1">
+<script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script defer src="/static/availability.js?v=1"></script>
+{% endblock %}
+
+{% block content %}
+<div id="availability-app" data-mobile-view="calendar">
+  <a class="availability-back" href="/campgrounds">← Browse campgrounds</a>
+  <header class="page-header availability-page-header">
+    <div>
+      <p class="availability-eyebrow">{{ seed.facility.rec_area_name or 'Recreation.gov campground' }}{% if seed.facility.state %} · {{ seed.facility.state }}{% endif %}</p>
+      <h1 class="page-title">{{ seed.facility.name }}</h1>
+      <p class="availability-subtitle">Find a site for your whole stay.</p>
+    </div>
+    <div class="availability-header-actions">
+      <a id="availability-monitor-link" class="btn btn-primary"
+         href="/monitors/new?campground={{ seed.facility.id }}&amp;check_in={{ seed.check_in }}&amp;check_out={{ seed.check_out }}">Monitor these dates</a>
+      <a id="campground-booking-link" class="btn btn-outline-primary"
+         href="https://www.recreation.gov/camping/campgrounds/{{ seed.facility.id }}"
+         target="_blank" rel="noopener noreferrer">Recreation.gov <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+
+  <section class="availability-panel availability-date-panel" aria-label="Select your stay">
+    <form id="availability-dates" class="availability-date-form">
+      <div class="form-group">
+        <label class="form-label" for="availability-check-in">Check-in</label>
+        <input class="form-input" id="availability-check-in" name="check_in" type="date"
+               value="{{ seed.check_in }}" min="{{ seed.today }}" max="{{ seed.max_date }}" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="availability-check-out">Check-out</label>
+        <input class="form-input" id="availability-check-out" name="check_out" type="date"
+               value="{{ seed.check_out }}" min="{{ seed.today }}" max="{{ seed.max_date }}" required>
+      </div>
+      <button class="btn btn-primary" type="submit">Check availability</button>
+      <p id="date-nights" class="availability-date-hint"></p>
+    </form>
+    <div class="availability-date-navigation">
+      <button id="previous-week" class="btn btn-outline btn-sm" type="button">← Previous week</button>
+      <button id="next-week" class="btn btn-outline btn-sm" type="button">Next week →</button>
+      <p id="date-pending" class="availability-inline-note" hidden>Apply dates to update the calendar, map, and monitor link.</p>
+    </div>
+  </section>
+
+  <noscript><p class="alert alert-warning">Enable JavaScript to explore the availability calendar and map. You can still open Recreation.gov or create a monitor above.</p></noscript>
+  <div id="availability-loading" class="availability-loading" role="status">
+    <span class="availability-spinner" aria-hidden="true"></span>
+    <span>Checking campsite availability…</span>
+  </div>
+  <div id="availability-error" class="alert alert-error availability-error" role="alert" hidden>
+    <p id="availability-error-text"></p>
+    <button id="availability-retry" class="btn btn-outline-danger btn-sm" type="button">Try again</button>
+  </div>
+
+  <div id="availability-results" hidden>
+    <div id="availability-notice" class="availability-source-notice" role="status" hidden></div>
+    <section class="availability-stay-summary" aria-label="Selected stay availability">
+      <div class="availability-stay-total">
+        <strong id="full-stay-count">0</strong>
+        <div><p id="stay-summary"></p><p id="loaded-stay" class="availability-summary-dates"></p></div>
+      </div>
+      <div class="availability-source-info">
+        <p id="availability-freshness"></p>
+        <p>Availability can change. Confirm on Recreation.gov.</p>
+      </div>
+    </section>
+
+    <section class="availability-panel availability-filters" aria-label="Filter campsites">
+      <div class="form-group">
+        <label class="form-label" for="filter-loop">Loop</label>
+        <select class="form-select" id="filter-loop"><option value="">All loops</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="filter-type">Site type</label>
+        <select class="form-select" id="filter-type"><option value="">All site types</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="filter-accessibility">Accessibility</label>
+        <select class="form-select" id="filter-accessibility">
+          <option value="">Any accessibility</option>
+          <option value="yes">Accessible sites</option>
+          <option value="no">Not accessible</option>
+          <option value="unknown">Not listed</option>
+        </select>
+      </div>
+      <label class="availability-checkbox"><input type="checkbox" id="filter-available"> Available for full stay only</label>
+      <button class="btn btn-outline btn-sm" type="button" id="clear-filters">Clear filters</button>
+    </section>
+
+    <div class="availability-view-toolbar">
+      <p id="result-count" role="status"></p>
+      <div class="availability-mobile-toggle" role="group" aria-label="View">
+        <button class="btn btn-sm" id="show-calendar" type="button" aria-pressed="true" aria-controls="availability-calendar-panel">Calendar</button>
+        <button class="btn btn-sm" id="show-map" type="button" aria-pressed="false" aria-controls="availability-map-panel">Map</button>
+      </div>
+    </div>
+
+    <div class="availability-workspace">
+      <section id="availability-calendar-panel" class="availability-panel availability-calendar-panel" aria-labelledby="calendar-title">
+        <div class="availability-panel-heading">
+          <div><h2 id="calendar-title">Daily availability</h2><p id="grid-range"></p></div>
+          <span class="availability-stay-key">Selected stay</span>
+        </div>
+        <p class="availability-calendar-hint">Daily counts reflect filters. A full stay requires the same site every night.</p>
+        <div id="calendar-scroll" class="availability-table-scroll" tabindex="0" role="region" aria-label="Campsite availability calendar; scroll horizontally for more dates">
+          <table class="availability-table">
+            <caption class="availability-sr-only">Campsite availability by night. Highlighted dates are in your selected stay. Check-out is excluded. Select a campsite to view its map marker and details.</caption>
+            <thead id="availability-table-head"></thead>
+            <tbody id="availability-table-body"></tbody>
+          </table>
+        </div>
+        <p id="calendar-empty" class="availability-empty" hidden>No campsites match these filters. Clear filters or try different dates.</p>
+        <details class="availability-legend-details" open>
+          <summary>Status key</summary>
+          <ul id="availability-legend" class="availability-legend"></ul>
+          <p>Each cell retains the status reported by Recreation.gov. Hover for the original label.</p>
+        </details>
+      </section>
+
+      <section id="availability-map-panel" class="availability-panel availability-map-panel" aria-labelledby="map-title">
+        <div class="availability-panel-heading">
+          <div><h2 id="map-title">Campsite map</h2><p>Colors reflect the full selected stay</p></div>
+          <button id="map-fit" type="button" class="btn btn-outline btn-sm">Fit sites</button>
+        </div>
+        <p id="map-message" class="availability-map-message" role="status" hidden></p>
+        <div id="campground-map" class="availability-map" role="region" aria-label="Interactive campsite map"></div>
+        <p id="map-empty" class="availability-map-message" hidden></p>
+        <div class="availability-map-footer">
+          <ul class="availability-map-key" aria-label="Map key">
+            <li><span class="map-key-dot map-key-open" aria-hidden="true"></span>Full stay available</li>
+            <li><span class="map-key-dot map-key-other" aria-hidden="true"></span>Other status</li>
+            <li><span class="map-key-dot map-key-selected" aria-hidden="true"></span>Selected site</li>
+          </ul>
+          <p id="map-coverage"></p>
+          <a id="official-map-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Official campground map ↗</a>
+        </div>
+      </section>
+
+      <section class="availability-panel availability-selected-panel" aria-labelledby="selected-site-name">
+        <p class="availability-eyebrow">Campsite details</p>
+        <h2 id="selected-site-name">Select a campsite</h2>
+        <div id="selected-site-details" aria-live="polite"></div>
+      </section>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="availability-seed">{{ seed | tojson }}</script>
+{% endblock %}

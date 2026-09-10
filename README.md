@@ -14,6 +14,37 @@ Built with FastAPI + HTMX, runs in Docker.
 - Polls each monitor on its own interval, dedupes alerts, and auto-stops once the trip is over.
 - Notifies via **ntfy** push and/or **email**.
 - Is **multi-user**: everyone logs in and manages their own monitors; one admin manages users.
+- **Browse campgrounds** without creating a monitor: view daily availability, filter by loop,
+  site type or accessibility, and select a campsite in a calendar or linked map.
+
+### Browse availability and maps
+
+Open **Campgrounds** in the navigation, search by campground or park name and state, and
+choose a campground. Select a stay of 1–31 nights within the next year. The calendar shows
+at least 14 days; a site counts as available for the full stay only when that same site is
+marked `Available` on every night, excluding checkout. Daily counts and map markers follow
+the selected filters. The calendar preserves other Recreation.gov statuses, including
+closed, cutoff, non-reservable and unknown dates.
+
+Select a row to highlight its map marker, or a marker to select its row and details. On a
+phone, switch between **Calendar** and **Map**. Sites without coordinates stay in the
+calendar. **Monitor these dates** opens the existing wizard for review; it does not create
+or start a monitor. Reservations are completed on Recreation.gov.
+
+Availability is fetched on demand and cached across viewers for 90 seconds. Failed refreshes
+back off for 30 seconds and can show explicitly labelled prior data for at most 15 minutes;
+a failure with no recent data displays an error. Browser work has limited concurrency so
+waiting viewers cannot occupy every worker used by monitors. Monitor polling and alert
+cadence are unchanged. Availability can change before booking.
+
+Campsite coordinates and accessibility use the optional `Campsites_API_v1.csv` export;
+official campground-map links also use `Media_API_v1.csv` when present. Missing optional
+exports do not prevent browsing the calendar. Metadata reflects the local export and is
+cached until restart; refresh the RIDB export and restart to update it. Coordinates are
+catalog locations, not surveyed boundaries. The map uses Leaflet 1.9.4 from a CDN and
+OpenStreetMap tiles with attribution; tile use is subject to the
+[OpenStreetMap tile policy](https://operations.osmfoundation.org/policies/tiles/).
+The calendar remains usable if map assets cannot load.
 
 ## How the codebase is organized
 
@@ -44,6 +75,9 @@ There are two interfaces over one shared core:
   accessible-site lookup), plus the notification senders (ntfy, email). This is the layer the CLI shares.
 - **`app/ridb.py`** — loads the facility catalog (a CSV export from recreation.gov's RIDB) into
   memory at startup and serves the search/filter queries behind the creation wizard.
+- **`app/availability.py`** + **`app/routes/campgrounds.py`** — the shared browser calendar
+  cache, date validation, campground search, and authenticated availability endpoints.
+  The calendar/map interface is in `app/static/availability.js` and its matching templates.
 - **`app/auth.py`** + **`app/user_store.py`** — auth. Sessions are signed cookies
   (`itsdangerous`); users live in a JSON file with bcrypt-hashed passwords. `auth.py` also holds
   the guards that gate routes by login, admin role, and monitor ownership.
