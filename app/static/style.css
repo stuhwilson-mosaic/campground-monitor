@@ -899,6 +899,14 @@ h1, h2, h3 {
     accent-color: var(--pine-600);
 }
 
+/* Site-type filter checkboxes (wizard step 3, edit page) */
+.filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0 1rem;
+    margin-top: .25rem;
+}
+
 /* ── Share link ─────────────────────────────────────────── */
 .share-link-row {
     display: flex;

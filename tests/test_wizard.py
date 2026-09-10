@@ -527,3 +527,30 @@ def test_seed_without_a_catalog_still_works(authed_client):
     from app.routes.wizard import seed_from_monitor
     seed = seed_from_monitor({"name": "m", "facilities": []})
     assert seed["facility_ids"] == []
+
+
+# ── Site-type filters ─────────────────────────────────────────────────────────
+
+def test_seed_from_monitor_carries_exclude_site_types():
+    from app.routes.wizard import seed_from_monitor
+    seed = seed_from_monitor({
+        "name": "c", "facilities": [{"id": "1", "name": "Camp", "type": "Campground"}],
+        "exclude_site_types": ["hike_to", "accessible"],
+    })
+    assert seed["exclude_site_types"] == ["hike_to", "accessible"]
+
+
+def test_seed_from_monitor_defaults_exclusions_to_empty():
+    from app.routes.wizard import seed_from_monitor
+    seed = seed_from_monitor({
+        "name": "c", "facilities": [{"id": "1", "name": "Camp", "type": "Campground"}],
+    })
+    assert seed["exclude_site_types"] == []
+
+
+def test_step3_renders_the_site_type_filters(authed_client):
+    resp = authed_client.get("/monitors/new/step3")
+    assert resp.status_code == 200
+    assert 'value="hike_to"' in resp.text
+    assert 'value="accessible"' in resp.text
+    assert "exclude_site_types" in resp.text

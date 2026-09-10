@@ -741,3 +741,73 @@ async def test_backfill_ignores_campground_monitors(tmp_data_dir, sample_monitor
     with patch("app.monitor_manager.get_permit_divisions") as mock_res:
         assert await mm.backfill_division_names() == 0
     assert not mock_res.called
+
+
+# ─────────────────────────────────────────────────────────────
+# Site-type filters: excluded sites never reach the alert path
+# ─────────────────────────────────────────────────────────────
+
+_STANDARD_SITE = {"site_id": "s-std", "site": "006", "loop": "A",
+                  "type": "STANDARD NONELECTRIC", "max_people": 6}
+_HIKE_SITE = {"site_id": "s-hike", "site": "H043", "loop": "H",
+              "type": "HIKE TO", "max_people": 6}
+
+
+@pytest.mark.asyncio
+async def test_run_check_applies_exclude_site_types(tmp_data_dir, sample_monitor):
+    """A hike-in site is dropped before alerting and never enters the ledger."""
+    sample_monitor["exclude_site_types"] = ["hike_to"]
+    mm = MonitorManager(tmp_data_dir)
+    mm.add_monitor(sample_monitor)
+
+    with patch("app.monitor_manager.check_campground",
+               return_value=[_STANDARD_SITE, _HIKE_SITE]), \
+         patch("app.monitor_manager.send_ntfy", return_value=True) as mock_ntfy:
+        await mm._run_check(mm.get_monitor(sample_monitor["id"]))
+
+    assert mock_ntfy.call_count == 1
+    body = mock_ntfy.call_args.kwargs["body"]
+    assert "006" in body and "H043" not in body
+    assert (sample_monitor["facility_id"], "s-hike") not in mm._notified[sample_monitor["id"]]
+
+    entry = mm.get_check_logs(sample_monitor["id"])[0]
+    assert entry["sites_found"] == 1
+    assert entry["filtered_out"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_check_without_filters_alerts_everything(tmp_data_dir, sample_monitor):
+    """No exclude list (older monitors) means today's behaviour, byte for byte."""
+    mm = MonitorManager(tmp_data_dir)
+    mm.add_monitor(sample_monitor)
+
+    with patch("app.monitor_manager.check_campground",
+               return_value=[_STANDARD_SITE, _HIKE_SITE]), \
+         patch("app.monitor_manager.send_ntfy", return_value=True) as mock_ntfy:
+        await mm._run_check(mm.get_monitor(sample_monitor["id"]))
+
+    body = mock_ntfy.call_args.kwargs["body"]
+    assert "006" in body and "H043" in body
+    entry = mm.get_check_logs(sample_monitor["id"])[0]
+    assert entry["sites_found"] == 2
+    assert entry["filtered_out"] == 0
+
+
+@pytest.mark.asyncio
+async def test_run_check_accessible_lookup_failure_is_an_error_not_an_alert(
+    tmp_data_dir, sample_monitor
+):
+    """If the accessibility lookup fails we must not alert on an excluded site."""
+    sample_monitor["exclude_site_types"] = ["accessible"]
+    mm = MonitorManager(tmp_data_dir)
+    mm.add_monitor(sample_monitor)
+
+    with patch("app.monitor_manager.check_campground", return_value=[_STANDARD_SITE]), \
+         patch("app.monitor_engine.requests.get", side_effect=RuntimeError("search down")), \
+         patch("app.monitor_manager.send_ntfy", return_value=True) as mock_ntfy:
+        await mm._run_check(mm.get_monitor(sample_monitor["id"]))
+
+    assert mock_ntfy.call_count == 0
+    entry = mm.get_check_logs(sample_monitor["id"])[0]
+    assert entry["status"] == "error"
+    assert mm.get_monitor(sample_monitor["id"])["stats"]["total_errors"] == 1

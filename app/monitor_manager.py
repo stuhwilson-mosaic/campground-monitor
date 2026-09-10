@@ -18,6 +18,7 @@ from typing import Any
 from app.monitor_engine import (
     check_campground,
     check_permit,
+    filter_sites,
     get_permit_divisions,
     send_email,
     send_ntfy,
@@ -526,6 +527,10 @@ class MonitorManager:
         check_out = config.get("check_out", "")
         entry_date = config.get("entry_date", "")
         party_size = config.get("party_size", 1)
+        # Site categories to drop before alerting (campgrounds only). Missing
+        # or empty means no filtering, which is what every pre-existing
+        # monitor has.
+        exclude_site_types = config.get("exclude_site_types") or []
 
         # Support both multi-facility (wizard) and single-facility (legacy) configs
         facilities = config.get("facilities", [])
@@ -578,6 +583,7 @@ class MonitorManager:
 
             # One record per HTTP call: a cross-month stay makes two.
             req_meta: list[dict] = []
+            filtered_out = 0
             try:
                 if is_permit:
                     div_ids = facility.get("division_ids") or None
@@ -589,6 +595,17 @@ class MonitorManager:
                     sites = await asyncio.to_thread(
                         check_campground, facility_id, check_in, check_out, req_meta
                     )
+                    if exclude_site_types:
+                        # Filtered here, before dedup, so an excluded site never
+                        # enters the ledger. filter_sites may make one (cached)
+                        # HTTP call for the accessibility flag, hence to_thread
+                        # and hence inside the try: a failed lookup is an error
+                        # for this cycle, not a reason to alert on the site.
+                        kept = await asyncio.to_thread(
+                            filter_sites, sites, exclude_site_types, facility_id
+                        )
+                        filtered_out = len(sites) - len(kept)
+                        sites = kept
             except Exception as exc:
                 await self._record_requests(
                     monitor_id, facility_id, facility_name,
@@ -645,6 +662,7 @@ class MonitorManager:
                 log_entry.update({
                     "status": "ok",
                     "sites_found": len(sites),
+                    "filtered_out": filtered_out,
                     "new_alerts": len(new_sites),
                     "alerted": delivered and len(new_sites) > 0,
                     "sites": [
@@ -665,6 +683,8 @@ class MonitorManager:
 
             if not new_sites and sites:
                 log.info("  %s: %d site(s) still available (already notified)", facility_name, len(sites))
+            elif not sites and filtered_out:
+                log.info("  %s: no availability (%d site(s) hidden by filters)", facility_name, filtered_out)
             elif not sites:
                 log.info("  %s: no availability", facility_name)
 

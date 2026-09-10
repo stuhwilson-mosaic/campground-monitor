@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, model_validator
 
 from app.auth import get_current_user, require_monitor_access
+from app.monitor_engine import SITE_TYPE_FILTERS
 from app.telemetry import audit
 
 router = APIRouter(prefix="/api")
@@ -64,6 +65,21 @@ def validate_dates_for_type(
     # return [], and all([]) is True, so every site would report available.
     if check_out <= check_in:
         _fail("Check-out must be after check-in.")
+
+
+def normalize_exclude_site_types(values: list[str]) -> list[str]:
+    """Validate a monitor's site-type exclusion list against SITE_TYPE_FILTERS.
+
+    Dedupes while keeping order. Unknown keys are rejected rather than dropped
+    so a typo in a client payload cannot silently produce an unfiltered monitor.
+    """
+    unknown = [v for v in values if v not in SITE_TYPE_FILTERS]
+    if unknown:
+        raise ValueError(
+            "Unknown site type filter(s): " + ", ".join(sorted(set(unknown)))
+            + ". Allowed: " + ", ".join(SITE_TYPE_FILTERS)
+        )
+    return list(dict.fromkeys(values))
 
 
 def _fail(message: str):
@@ -147,6 +163,9 @@ class CreateMonitorRequest(BaseModel):
     # {facility_id: {division_id: name}} — captured by the wizard's trailhead
     # picker so the dashboard can name trailheads without an API call.
     selected_division_names: dict[str, dict[str, str]] = {}
+    # SITE_TYPE_FILTERS keys to drop from campground alerts. Empty = alert on
+    # every site, which is what every monitor did before this field existed.
+    exclude_site_types: list[str] = []
 
     @model_validator(mode="after")
     def _check_type_and_dates(self):
@@ -161,6 +180,12 @@ class CreateMonitorRequest(BaseModel):
         kind = resolve_facility_type(self.facility_ids, self.facility_types)
         validate_dates_for_type(
             kind, self.check_in, self.check_out, self.entry_date, self.nights
+        )
+        # Permits are filtered by trailhead, not campsite type; the list is
+        # meaningless there and is dropped so it never shows on the card.
+        self.exclude_site_types = (
+            [] if kind == "Permit"
+            else normalize_exclude_site_types(self.exclude_site_types)
         )
         return self
 
@@ -201,6 +226,7 @@ async def create_monitor(body: CreateMonitorRequest, request: Request):
         "entry_date": body.entry_date,
         "party_size": body.party_size,
         "nights": body.nights,
+        "exclude_site_types": body.exclude_site_types,
         "poll_interval_seconds": body.poll_interval_seconds,
         "enable_ntfy": body.notify_ntfy,
         "ntfy_topic": body.ntfy_topic,
@@ -256,6 +282,8 @@ class UpdateDatesRequest(BaseModel):
     entry_date: str = ""
     nights: Optional[int] = None
     poll_interval_seconds: Optional[int] = None
+    # None = leave the stored list alone; [] = clear it.
+    exclude_site_types: Optional[list[str]] = None
 
     @model_validator(mode="after")
     def _check_interval(self):
@@ -265,6 +293,8 @@ class UpdateDatesRequest(BaseModel):
                 "Check frequency must be one of: "
                 + ", ".join(str(i) for i in ALLOWED_POLL_INTERVALS)
             )
+        if self.exclude_site_types is not None:
+            self.exclude_site_types = normalize_exclude_site_types(self.exclude_site_types)
         return self
 
 
@@ -309,10 +339,12 @@ async def update_monitor_dates(monitor_id: str, body: UpdateDatesRequest, reques
         # The poll loop re-reads config each cycle, so this applies on the next
         # tick. Editing is stop-first anyway, so it takes effect on restart.
         fields["poll_interval_seconds"] = body.poll_interval_seconds
+    if body.exclude_site_types is not None and kind != "Permit":
+        fields["exclude_site_types"] = body.exclude_site_types
     manager.update_monitor(monitor_id, **fields)
 
-    # The dedup ledger refers to the old date window; keeping it would suppress
-    # the first alert under the new dates.
+    # The dedup ledger refers to the old date window (and the old filter set);
+    # keeping it would suppress the first alert under the new settings.
     manager.clear_notified(monitor_id)
     await audit(request, "monitor.edit", username=user.username,
                 target_id=monitor_id, target_name=monitor.get("name"),

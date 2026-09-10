@@ -74,6 +74,7 @@ def seed_from_monitor(monitor: dict, catalog=None) -> dict:
         "entry_date": monitor.get("entry_date", ""),
         "party_size": monitor.get("party_size", 1),
         "nights": monitor.get("nights"),
+        "exclude_site_types": list(monitor.get("exclude_site_types") or []),
         "poll_interval_seconds": monitor.get("poll_interval_seconds", 300),
         "enable_ntfy": bool(monitor.get("enable_ntfy")),
         "ntfy_topic": monitor.get("ntfy_topic", ""),
