@@ -71,6 +71,10 @@ function appendReviewRow(dl, label, value) {
     } else {
       appendReviewRow(datesDl, "Check-in", wizardData.check_in || "(none)");
       appendReviewRow(datesDl, "Check-out", wizardData.check_out || "(none)");
+      var labels = {{ SITE_TYPE_FILTERS | tojson }};
+      var excluded = (wizardData.exclude_site_types || []).map(function (k) { return labels[k] || k; });
+      appendReviewRow(datesDl, "Excluding",
+        excluded.length ? excluded.join(", ") : "nothing (all site types)");
     }
     var secs = wizardData.poll_interval_seconds || 300;
     var intervalLabel = secs < 60
@@ -141,6 +145,7 @@ function createMonitor(start) {
     entry_date: wizardData.entry_date || "",
     party_size: wizardData.party_size || 1,
     nights: wizardData._isPermit ? (wizardData.nights || null) : null,
+    exclude_site_types: wizardData._isPermit ? [] : (wizardData.exclude_site_types || []),
     poll_interval_seconds: wizardData.poll_interval_seconds || 300,
     notify_email: !!wizardData.enable_email,
     notify_ntfy:  !!wizardData.enable_ntfy,

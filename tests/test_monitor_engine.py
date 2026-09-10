@@ -586,3 +586,194 @@ def test_send_email_passes_a_socket_timeout():
         "smtplib.SMTP called without timeout=; a hung host blocks forever"
     )
     assert mock_smtp.call_args.kwargs["timeout"] > 0
+
+
+# ─────────────────────────────────────────────────────────────
+# Site-type filters (exclude hike-in, accessible, group, ...)
+# ─────────────────────────────────────────────────────────────
+
+import os  # noqa: E402
+
+_REPO_RIDB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "RIDBFullExport_V1_CSV")
+
+from app.monitor_engine import (  # noqa: E402
+    SITE_TYPE_FILTERS,
+    classify_site_type,
+    filter_sites,
+    get_accessible_sites,
+    site_type_key,
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_accessible_cache():
+    engine._accessible_site_cache.clear()
+    yield
+    engine._accessible_site_cache.clear()
+
+
+@pytest.mark.parametrize("campsite_type, expected", [
+    ("STANDARD NONELECTRIC", {"standard_nonelectric"}),
+    ("STANDARD ELECTRIC", {"standard_electric"}),
+    ("RV ELECTRIC", {"rv_electric"}),
+    ("HIKE TO", {"hike_to"}),
+    ("WALK TO", {"walk_to"}),
+    ("BOAT IN", {"boat_in"}),
+    ("GROUP TENT ONLY AREA NONELECTRIC", {"group_tent_only_area_nonelectric"}),
+    ("GROUP SHELTER ELECTRIC", {"group_shelter_electric"}),
+    ("MANAGEMENT", {"management"}),
+    ("hike to", {"hike_to"}),          # case-insensitive
+    ("  HIKE   TO ", {"hike_to"}),     # whitespace-tolerant
+    ("YURT", set()),                   # real type, deliberately not offered
+    ("GROUP WALK TO", set()),          # no substring/prefix matching
+    ("", set()),
+    ("?", set()),
+    (None, set()),
+])
+def test_classify_site_type(campsite_type, expected):
+    assert classify_site_type(campsite_type) == expected
+
+
+def test_site_type_key_slugifies():
+    assert site_type_key("GROUP TENT ONLY AREA NONELECTRIC") == "group_tent_only_area_nonelectric"
+
+
+def test_every_filter_key_has_a_label():
+    """Templates render the checkbox group straight from this mapping."""
+    assert "accessible" in SITE_TYPE_FILTERS
+    for key in ("hike_to", "walk_to", "standard_nonelectric", "rv_electric", "management"):
+        assert key in SITE_TYPE_FILTERS
+    assert all(SITE_TYPE_FILTERS.values())
+    assert len(SITE_TYPE_FILTERS) == 20
+
+
+@pytest.mark.skipif(
+    not os.path.exists(os.path.join(_REPO_RIDB, "Campsites_API_v1.csv")),
+    reason="full RIDB export not present",
+)
+def test_every_offered_type_exists_in_the_ridb_export():
+    """Each offered key (bar the accessibility flag) must be a real type string.
+
+    Guards against a typo in SITE_TYPE_FILTERS producing a checkbox that can
+    never match anything.
+    """
+    import csv
+    seen = set()
+    with open(os.path.join(_REPO_RIDB, "Campsites_API_v1.csv"), encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            seen.add(site_type_key(row["CampsiteType"]))
+    missing = sorted(k for k in SITE_TYPE_FILTERS if k != "accessible" and k not in seen)
+    assert missing == [], f"filter keys with no matching RIDB campsite type: {missing}"
+
+
+def _site(site_id, campsite_type):
+    return {"site_id": site_id, "site": site_id, "loop": "A",
+            "type": campsite_type, "max_people": 6}
+
+
+def test_filter_sites_drops_excluded_types():
+    sites = [_site("1", "STANDARD NONELECTRIC"), _site("2", "HIKE TO"),
+             _site("3", "WALK TO"), _site("4", "GROUP STANDARD NONELECTRIC")]
+    kept = filter_sites(sites, ["hike_to", "walk_to", "group_standard_nonelectric"],
+                        facility_id="232448")
+    assert [s["site_id"] for s in kept] == ["1"]
+
+
+def test_filter_sites_with_no_exclusions_returns_input_unchanged():
+    sites = [_site("1", "HIKE TO")]
+    with patch("app.monitor_engine.requests.get") as mock_get:
+        assert filter_sites(sites, [], facility_id="232448") == sites
+        assert filter_sites(sites, None, facility_id="232448") == sites
+    assert not mock_get.called
+
+
+def test_filter_sites_ignores_unknown_keys():
+    sites = [_site("1", "STANDARD NONELECTRIC")]
+    assert filter_sites(sites, ["not_a_real_filter"], facility_id="1") == sites
+
+
+def _make_search_response(accessible_ids, all_ids, total=None):
+    return {
+        "campsites": [
+            {"campsite_id": cid, "accessible": "true" if cid in accessible_ids else "false"}
+            for cid in all_ids
+        ],
+        "total": total if total is not None else len(all_ids),
+    }
+
+
+def test_get_accessible_sites_reads_the_string_flag():
+    """recreation.gov sends accessible as the string "true"/"false"."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = _make_search_response({"108", "222"}, ["100", "108", "222"])
+    with patch("app.monitor_engine.requests.get", return_value=mock_resp) as mock_get:
+        result = get_accessible_sites("232447")
+    assert result == {"108", "222"}
+    params = mock_get.call_args.kwargs["params"]
+    assert params["fq"] == "asset_id:232447"
+
+
+def test_get_accessible_sites_is_cached_per_facility():
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = _make_search_response({"1"}, ["1", "2"])
+    with patch("app.monitor_engine.requests.get", return_value=mock_resp) as mock_get:
+        get_accessible_sites("232447")
+        get_accessible_sites("232447")
+        assert mock_get.call_count == 1
+        get_accessible_sites("232448")
+        assert mock_get.call_count == 2
+
+
+def test_get_accessible_sites_pages_until_total():
+    page1 = MagicMock()
+    page1.json.return_value = _make_search_response({"1"}, ["1", "2"], total=4)
+    page2 = MagicMock()
+    page2.json.return_value = _make_search_response({"4"}, ["3", "4"], total=4)
+    with patch("app.monitor_engine.requests.get", side_effect=[page1, page2]) as mock_get:
+        result = get_accessible_sites("232447")
+    assert result == {"1", "4"}
+    assert mock_get.call_count == 2
+    assert mock_get.call_args_list[1].kwargs["params"]["start"] == 2
+
+
+def test_get_accessible_sites_stops_on_an_empty_page():
+    """A total that never reconciles must not loop forever."""
+    page = MagicMock()
+    page.json.return_value = _make_search_response(set(), [], total=10)
+    with patch("app.monitor_engine.requests.get", return_value=page) as mock_get:
+        assert get_accessible_sites("232447") == set()
+    assert mock_get.call_count == 1
+
+
+def test_get_accessible_sites_raises_on_http_error():
+    """A failed lookup must surface, not silently mean "nothing is accessible"."""
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = requests.HTTPError("500")
+    with patch("app.monitor_engine.requests.get", return_value=mock_resp):
+        with pytest.raises(requests.HTTPError):
+            get_accessible_sites("232447")
+    assert "232447" not in engine._accessible_site_cache
+
+
+def test_filter_sites_excludes_accessible_via_lookup():
+    engine._accessible_site_cache["232447"] = {"108"}
+    sites = [_site("100", "STANDARD NONELECTRIC"), _site("108", "STANDARD NONELECTRIC")]
+    with patch("app.monitor_engine.requests.get") as mock_get:
+        kept = filter_sites(sites, ["accessible"], facility_id="232447")
+    assert [s["site_id"] for s in kept] == ["100"]
+    assert not mock_get.called  # served from cache
+
+
+def test_filter_sites_only_looks_up_accessibility_when_asked():
+    sites = [_site("100", "HIKE TO")]
+    with patch("app.monitor_engine.requests.get") as mock_get:
+        filter_sites(sites, ["hike_to"], facility_id="232447")
+    assert not mock_get.called
+
+
+def test_filter_sites_accessible_lookup_failure_propagates():
+    sites = [_site("100", "STANDARD NONELECTRIC")]
+    with patch("app.monitor_engine.requests.get", side_effect=requests.ConnectionError("down")):
+        with pytest.raises(requests.ConnectionError):
+            filter_sites(sites, ["accessible"], facility_id="232447")

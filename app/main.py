@@ -45,6 +45,10 @@ def create_app() -> FastAPI:
     manager = MonitorManager(config.DATA_DIR, telemetry=telemetry)
     catalog = RIDBCatalog(config.RIDB_DIR)
     templates = Jinja2Templates(directory="app/templates")
+    # Available to every template (card, wizard, edit page) without each
+    # route having to pass it. Keys are stored on monitors; labels are shown.
+    from app.monitor_engine import SITE_TYPE_FILTERS
+    templates.env.globals["SITE_TYPE_FILTERS"] = SITE_TYPE_FILTERS
 
     async def _prune_telemetry_forever():
         """Drop check rows past the retention window, at boot then daily.

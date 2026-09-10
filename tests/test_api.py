@@ -447,3 +447,79 @@ def test_edit_page_offers_the_frequency_selector(client):
     body = client.get(f"/monitors/{mid}/edit").text
     assert 'id="poll-interval"' in body
     assert '<option value="900" selected>' in body
+
+
+# ── Site-type filters ─────────────────────────────────────────────────────────
+
+def test_create_stores_exclude_site_types(client):
+    resp = client.post("/api/monitors", json=campground_payload(
+        exclude_site_types=["hike_to", "accessible", "hike_to"]))
+    assert resp.status_code == 200
+    stored = client.app_ref.state.manager.get_monitor(resp.json()["id"])
+    assert stored["exclude_site_types"] == ["hike_to", "accessible"]  # deduped, order kept
+
+
+def test_create_defaults_to_no_exclusions(client):
+    resp = client.post("/api/monitors", json=campground_payload())
+    assert resp.status_code == 200
+    stored = client.app_ref.state.manager.get_monitor(resp.json()["id"])
+    assert stored["exclude_site_types"] == []
+
+
+def test_create_rejects_unknown_exclusion(client):
+    resp = client.post("/api/monitors", json=campground_payload(
+        exclude_site_types=["hike_to", "yurts"]))
+    assert resp.status_code == 422
+    assert "yurts" in resp.text
+
+
+def test_permit_monitor_ignores_exclusions(client):
+    """Permits have divisions, not campsite types; the list is dropped."""
+    resp = client.post("/api/monitors", json=permit_payload(exclude_site_types=["hike_to"]))
+    assert resp.status_code == 200
+    stored = client.app_ref.state.manager.get_monitor(resp.json()["id"])
+    assert stored["exclude_site_types"] == []
+
+
+def test_edit_changes_exclude_site_types(client):
+    mid = _make_monitor(client, exclude_site_types=["boat_in"])
+    resp = client.post(f"/api/monitors/{mid}/dates",
+                       json={"check_in": CHECK_IN, "check_out": CHECK_OUT,
+                             "exclude_site_types": ["hike_to"]})
+    assert resp.status_code == 200
+    assert client.app_ref.state.manager.get_monitor(mid)["exclude_site_types"] == ["hike_to"]
+
+
+def test_edit_leaves_exclusions_alone_when_omitted(client):
+    mid = _make_monitor(client, exclude_site_types=["boat_in"])
+    resp = client.post(f"/api/monitors/{mid}/dates",
+                       json={"check_in": CHECK_IN, "check_out": CHECK_OUT})
+    assert resp.status_code == 200
+    assert client.app_ref.state.manager.get_monitor(mid)["exclude_site_types"] == ["boat_in"]
+
+
+def test_edit_rejects_unknown_exclusion(client):
+    mid = _make_monitor(client)
+    resp = client.post(f"/api/monitors/{mid}/dates",
+                       json={"check_in": CHECK_IN, "check_out": CHECK_OUT,
+                             "exclude_site_types": ["nope"]})
+    assert resp.status_code == 422
+
+
+def test_edit_page_offers_the_site_type_filters(client):
+    mid = _make_monitor(client, exclude_site_types=["hike_to"])
+    resp = client.get(f"/monitors/{mid}/edit")
+    assert resp.status_code == 200
+    assert 'value="hike_to"' in resp.text
+    assert 'value="hike_to" checked' in resp.text
+    assert 'value="boat_in"' in resp.text
+
+
+def test_edit_page_hides_site_type_filters_for_permits(client):
+    mid = _make_monitor(
+        client, id="edit-permit-filters",
+        facilities=[{"id": "445859", "name": "Wilderness", "type": "Permit"}],
+        check_in="", check_out="", entry_date=ENTRY_DATE,
+    )
+    resp = client.get(f"/monitors/{mid}/edit")
+    assert 'value="hike_to"' not in resp.text

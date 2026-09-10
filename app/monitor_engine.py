@@ -18,6 +18,45 @@ from app.config import RECGOV_BASE_URL, RECGOV_HEADERS
 # Cache of {facility_id: {division_id: name}} to avoid repeated permitcontent calls
 _permit_division_cache: dict[str, dict[str, str]] = {}
 
+# Cache of {facility_id: {campsite_id, ...}} for sites flagged accessible.
+# Accessibility is not part of campsite_type, so it needs a separate lookup;
+# it is static per facility, so one fetch per process is enough.
+_accessible_site_cache: dict[str, set[str]] = {}
+
+RECGOV_SEARCH_URL = "https://www.recreation.gov/api/search/campsites"
+
+# Site types a monitor can exclude from alerts, keyed by the value stored in
+# a monitor's `exclude_site_types` list. Order is the order the UI shows.
+# Every key except "accessible" is a recreation.gov campsite_type string,
+# slugified (lowercase, spaces -> underscores), and is matched exactly by
+# classify_site_type(). The list is the 19 most common types in the RIDB
+# export (each 300+ sites); rarer ones (yurt, lookout, mooring, ...) are left
+# out on purpose to keep the checkbox list short and cannot be excluded.
+# "accessible" is a per-site flag, not a type, and comes from
+# get_accessible_sites().
+SITE_TYPE_FILTERS: dict[str, str] = {
+    "accessible": "Accessible (ADA) sites",
+    "standard_nonelectric": "Standard nonelectric",
+    "standard_electric": "Standard electric",
+    "tent_only_nonelectric": "Tent only nonelectric",
+    "tent_only_electric": "Tent only electric",
+    "rv_nonelectric": "RV nonelectric",
+    "rv_electric": "RV electric",
+    "walk_to": "Walk to",
+    "hike_to": "Hike to",
+    "boat_in": "Boat in",
+    "equestrian_nonelectric": "Equestrian nonelectric",
+    "cabin_nonelectric": "Cabin nonelectric",
+    "group_standard_nonelectric": "Group standard nonelectric",
+    "group_tent_only_area_nonelectric": "Group tent only area nonelectric",
+    "group_shelter_nonelectric": "Group shelter nonelectric",
+    "group_shelter_electric": "Group shelter electric",
+    "group_picnic_area": "Group picnic area",
+    "picnic": "Picnic",
+    "parking": "Parking",
+    "management": "Management",
+}
+
 log = logging.getLogger(__name__)
 
 
@@ -167,6 +206,90 @@ def check_campground(
             })
 
     return available
+
+
+def site_type_key(campsite_type: str | None) -> str:
+    """Slugify a recreation.gov campsite_type: "HIKE TO" -> "hike_to"."""
+    return "_".join((campsite_type or "").lower().split())
+
+
+def classify_site_type(campsite_type: str | None) -> set[str]:
+    """Return the SITE_TYPE_FILTERS key for a campsite_type, or an empty set.
+
+    Exact match on the slugified type. A type not in the list (a rare one, or
+    a new value in a refreshed export) gets no key and can never be excluded.
+    Returned as a set so the caller can union it with the accessibility flag.
+    """
+    key = site_type_key(campsite_type)
+    return {key} if key in SITE_TYPE_FILTERS else set()
+
+
+def get_accessible_sites(facility_id: str) -> set[str]:
+    """Return the campsite_ids flagged accessible for a campground (cached).
+
+    Uses the campsite search API, which is the only place recreation.gov
+    exposes the flag; the month availability payload does not carry it. The
+    flag arrives as the string "true"/"false". Pages by `start` until `total`
+    is reached or a page comes back empty.
+
+    Raises on HTTP failure rather than returning an empty set: an empty set
+    would silently alert on sites the user asked to exclude.
+    """
+    if facility_id in _accessible_site_cache:
+        return _accessible_site_cache[facility_id]
+
+    accessible: set[str] = set()
+    seen = 0
+    page_size = 1000
+    while True:
+        resp = requests.get(
+            RECGOV_SEARCH_URL,
+            params={"fq": f"asset_id:{facility_id}", "size": page_size, "start": seen},
+            headers=RECGOV_HEADERS,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        page = data.get("campsites") or []
+        for site in page:
+            if str(site.get("accessible", "")).lower() == "true":
+                accessible.add(str(site.get("campsite_id")))
+        seen += len(page)
+        total = data.get("total")
+        if not page or not isinstance(total, int) or seen >= total:
+            break
+
+    _accessible_site_cache[facility_id] = accessible
+    return accessible
+
+
+def filter_sites(
+    sites: list[dict], exclude_types: list[str] | None, facility_id: str
+) -> list[dict]:
+    """Drop sites whose category is in `exclude_types` (SITE_TYPE_FILTERS keys).
+
+    Applied after check_campground so excluded sites never reach the alert
+    path or the dedup ledger. The accessibility lookup only happens when
+    "accessible" is excluded, so monitors without that filter make no extra
+    requests. Unknown keys are ignored.
+    """
+    excluded = {t for t in (exclude_types or []) if t in SITE_TYPE_FILTERS}
+    if not excluded:
+        return sites
+
+    accessible_ids: set[str] = set()
+    if "accessible" in excluded:
+        accessible_ids = get_accessible_sites(facility_id)
+
+    kept = []
+    for site in sites:
+        tags = classify_site_type(site.get("type"))
+        if str(site.get("site_id")) in accessible_ids:
+            tags.add("accessible")
+        if tags & excluded:
+            continue
+        kept.append(site)
+    return kept
 
 
 def get_permit_divisions(facility_id: str) -> dict[str, str]:

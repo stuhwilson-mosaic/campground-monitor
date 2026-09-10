@@ -35,6 +35,23 @@
       <input type="date" id="check-out" class="form-control" value="{{ monitor.check_out }}">
     </div>
   </div>
+
+  {% set excluded = monitor.exclude_site_types | default([]) %}
+  <div class="form-group">
+    <span class="form-label">Don't alert me about <span class="form-optional">(optional)</span></span>
+    <div class="filter-grid">
+      {% for key, label in SITE_TYPE_FILTERS.items() %}
+      <label class="toggle-label">
+        <input type="checkbox" name="exclude_site_types" value="{{ key }}"{% if key in excluded %} checked{% endif %}>
+        {{ label }}
+      </label>
+      {% endfor %}
+    </div>
+    <p class="form-hint">
+      Changing this resets the alert history, so anything still open that now
+      passes the filter will alert again on the next check.
+    </p>
+  </div>
   {% endif %}
 
   <div class="form-group">
@@ -119,7 +136,10 @@ function saveEdits() {
     ? { entry_date: document.getElementById("entry-date").value,
         nights: parseInt(document.getElementById("nights").value, 10) || null }
     : { check_in: document.getElementById("check-in").value,
-        check_out: document.getElementById("check-out").value };
+        check_out: document.getElementById("check-out").value,
+        exclude_site_types: Array.prototype.map.call(
+          document.querySelectorAll('input[name="exclude_site_types"]:checked'),
+          function (cb) { return cb.value; }) };
   payload.poll_interval_seconds =
     parseInt(document.getElementById("poll-interval").value, 10);
 

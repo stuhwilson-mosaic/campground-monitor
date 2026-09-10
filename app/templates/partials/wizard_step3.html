@@ -23,6 +23,26 @@
                oninput="wizardData.check_out = this.value; updateStep3Next();">
       </div>
     </div>
+
+    <!-- Site-type filters. Campgrounds only: permits are filtered by trailhead
+         in step 2. Keys and labels come from SITE_TYPE_FILTERS in the engine. -->
+    <div class="form-group">
+      <span class="form-label">Don't alert me about <span class="form-optional">(optional)</span></span>
+      <div class="filter-grid">
+        {% for key, label in SITE_TYPE_FILTERS.items() %}
+        <label class="toggle-label">
+          <input type="checkbox" name="exclude_site_types" value="{{ key }}"
+                 onchange="toggleExcludeSiteType(this.value, this.checked)">
+          {{ label }}
+        </label>
+        {% endfor %}
+      </div>
+      <p class="form-hint">
+        Leave everything unchecked to be alerted about every open site.
+        Types are recreation.gov's own labels for each campsite; the common
+        ones are listed here.
+      </p>
+    </div>
   </div>
 
   <!-- Permit dates (entry date + party size) -->
@@ -109,6 +129,11 @@
   if (edEl   && wizardData.entry_date) edEl.value   = wizardData.entry_date;
   if (psEl   && wizardData.party_size) psEl.value   = String(wizardData.party_size);
   if (ngEl   && wizardData.nights)     ngEl.value   = String(wizardData.nights);
+  // Filters arrive unchecked on back-navigation and on Clone; re-check from state.
+  var excluded = wizardData.exclude_site_types || [];
+  document.querySelectorAll('input[name="exclude_site_types"]').forEach(function (cb) {
+    cb.checked = excluded.indexOf(cb.value) !== -1;
+  });
   // Same precedence rule as step 4: an in-progress value wins over the stored
   // default, but wizardData must adopt the default when nothing is set, since
   // the submitted payload is built from wizardData rather than the DOM.
@@ -119,6 +144,12 @@
   }
   updateStep3Next();
 })();
+
+function toggleExcludeSiteType(key, on) {
+  var list = (wizardData.exclude_site_types || []).filter(function (v) { return v !== key; });
+  if (on) list.push(key);
+  wizardData.exclude_site_types = list;
+}
 
 function updateStep3Next() {
   var ok;

@@ -93,6 +93,11 @@
     {% else %}
       <span>{{ m.check_in }} &rarr; {{ m.check_out }}</span>
     {% endif %}
+    {% if m.exclude_site_types %}
+    &nbsp;&#183;&nbsp;
+    <span title="Site types excluded from alerts">excl.
+      {%- for key in m.exclude_site_types %}{{ " " if loop.first else ", " }}{{ SITE_TYPE_FILTERS.get(key, key) | lower }}{% endfor %}</span>
+    {% endif %}
     &nbsp;&#183;&nbsp;
     {% set iv = m.poll_interval_seconds | default(300) %}
     <span>every {% if iv < 60 %}{{ iv | int }}s{% else %}{{ (iv / 60) | int }}m{% endif %}</span>

@@ -347,3 +347,19 @@ def test_status_pill_still_shows_the_status(authed_app_client):
     _add(app, "runner", "running", "2026-01-01T00:00:00")
     body = client.get("/dashboard").text
     assert 'class="status-word">running<' in body
+
+
+def test_card_shows_excluded_site_types_by_label(authed_app_client):
+    """Keys are stored; the card must show the human label via the Jinja global."""
+    client, app = authed_app_client
+    _add(app, "filtered", "stopped", "2026-01-01T00:00:00",
+         exclude_site_types=["hike_to", "accessible"])
+    body = client.get("/dashboard").text
+    assert "hike to" in body and "accessible (ada) sites" in body
+
+
+def test_card_omits_filter_line_when_nothing_excluded(authed_app_client):
+    client, app = authed_app_client
+    _add(app, "plain", "stopped", "2026-01-01T00:00:00")
+    body = client.get("/dashboard").text
+    assert "Site types excluded from alerts" not in body
