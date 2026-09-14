@@ -142,6 +142,14 @@ def _request(url: str, params: dict, meta: list | None = None, timeout: int = 30
             meta.append(record)
 
 
+def fetch_campground_month(
+    facility_id: str, month_start: str, meta: list | None = None, timeout: int = 30
+) -> dict:
+    """Fetch the unfiltered calendar shared by monitoring and campground browsing."""
+    url = f"{RECGOV_BASE_URL}/{facility_id}/month"
+    return _request(url, {"start_date": month_start}, meta=meta, timeout=timeout).json()
+
+
 def check_campground(
     facility_id: str, check_in: str, check_out: str, meta: list | None = None
 ) -> list[dict]:
@@ -174,7 +182,6 @@ def check_campground(
             "the stay covers no nights"
         )
     months = _months_needed(check_in, check_out)
-    url = f"{RECGOV_BASE_URL}/{facility_id}/month"
 
     # Collect availabilities keyed by site_id across all months.
     # site_meta holds the static info (site name, loop, etc.) from first encounter.
@@ -182,8 +189,7 @@ def check_campground(
     site_meta: dict[str, dict] = {}
 
     for month_start in months:
-        resp = _request(url, {"start_date": month_start}, meta=meta)
-        data = resp.json()
+        data = fetch_campground_month(facility_id, month_start, meta=meta)
 
         for site_id, site_info in data.get("campsites", {}).items():
             # Merge availability dates into our running map

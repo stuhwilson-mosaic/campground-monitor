@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Browse Campgrounds · Campground Monitor{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/availability.css?v=1">
+{% endblock %}
+
+{% block content %}
+<header class="page-header campground-browse-header">
+  <div>
+    <p class="availability-eyebrow">Find your next campsite</p>
+    <h1 class="page-title">Browse campgrounds</h1>
+    <p class="availability-subtitle">Explore dates and sites, then set a monitor for the stay you want.</p>
+  </div>
+</header>
+
+<form method="get" action="/campgrounds" class="campground-search availability-panel" role="search">
+  <div class="form-group">
+    <label class="form-label" for="campground-query">Campground or recreation area</label>
+    <input class="form-input" type="search" id="campground-query" name="q" value="{{ query }}"
+           placeholder="Try Tuolumne or Yosemite" maxlength="120">
+  </div>
+  <div class="form-group">
+    <label class="form-label" for="campground-state">State</label>
+    <select class="form-select" id="campground-state" name="state">
+      <option value="">All states</option>
+      {% for item in states %}
+      <option value="{{ item }}"{% if state == item %} selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn btn-primary">Find campgrounds</button>
+  {% if query or state %}<a href="/campgrounds" class="btn btn-outline">Clear</a>{% endif %}
+</form>
+
+<div class="campground-result-heading">
+  <h2>{{ campgrounds | length }} campground{{ '' if campgrounds | length == 1 else 's' }}{% if truncated %} shown{% endif %}</h2>
+  <p>Recreation.gov reservable campgrounds</p>
+</div>
+{% if truncated %}
+<p class="availability-inline-note">More campgrounds match. Add a name or choose a state to narrow the list.</p>
+{% endif %}
+
+{% if campgrounds %}
+<ul class="campground-browse-grid" aria-label="Campgrounds">
+  {% for campground in campgrounds %}
+  <li>
+    <a class="campground-browse-card" href="/campgrounds/{{ campground.id }}">
+      <div class="campground-card-location">{{ campground.state or 'State not listed' }}</div>
+      <h3>{{ campground.name }}</h3>
+      <p>{{ campground.rec_area_name or 'Recreation.gov campground' }}</p>
+      <span class="campground-card-action">View availability <span aria-hidden="true">→</span></span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="availability-panel campground-no-results">
+  <h2>No campgrounds found</h2>
+  <p>Try a shorter name, a recreation area, or another state.</p>
+  <a href="/campgrounds" class="btn btn-outline-primary">Browse all campgrounds</a>
+</div>
+{% endif %}
+{% endblock %}

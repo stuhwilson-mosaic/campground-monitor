@@ -156,6 +156,9 @@ h1, h2, h3 {
     font-weight: 400;
 }
 
+.facility-browse-row { position: relative; }
+.facility-browse-link { display: inline-block; margin: 0 0 .7rem 2.25rem; font-size: .8rem; }
+
 /* ── Main content ───────────────────────────────────────── */
 .main-content {
     padding: 1.75rem 1.5rem;

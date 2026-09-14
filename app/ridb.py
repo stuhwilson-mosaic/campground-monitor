@@ -1,7 +1,11 @@
 """RIDB catalog loader — reads RIDB CSV exports and provides filtered lookups."""
 import csv
+import math
 import os
+import threading
+from collections import OrderedDict
 from typing import Optional
+from urllib.parse import urlsplit
 
 
 # Facility types we care about
@@ -70,6 +74,8 @@ class RIDBCatalog:
 
     def __init__(self, ridb_dir: str) -> None:
         self._ridb_dir = ridb_dir
+        self._campsite_metadata = OrderedDict()
+        self._metadata_lock = threading.Lock()
         self._load()
 
     # ── Internal load ──────────────────────────────────────────────────────────
@@ -292,3 +298,89 @@ class RIDBCatalog:
             })
         result.sort(key=lambda f: f["name"])
         return result
+
+    def get_campground(self, facility_id: str) -> dict | None:
+        """Public browse metadata for an enabled, reservable campground only."""
+        row = self._facilities.get(facility_id)
+        if not row or row.get("FacilityTypeDescription") != "Campground" or not facility_id.isdigit():
+            return None
+        rec_area_id = row.get("ParentRecAreaID", "")
+        rec_area = self._rec_areas.get(rec_area_id, {})
+        lat, lon = _coordinates(row.get("FacilityLatitude"), row.get("FacilityLongitude"))
+        return {
+            "id": facility_id, "name": row.get("FacilityName", "").strip() or f"Campground {facility_id}",
+            "state": row.get("_state", ""), "rec_area_id": rec_area_id,
+            "rec_area_name": rec_area.get("RecAreaName", ""),
+            "lat": lat, "lon": lon, "map_url": _map_url(row.get("FacilityMapURL", "")),
+            "booking_url": f"https://www.recreation.gov/camping/campgrounds/{facility_id}",
+        }
+
+    def search_campgrounds(self, query: str = "", state: str = "", limit: int = 61) -> list[dict]:
+        """Search campground and park names, without fetching availability in bulk."""
+        words = query.casefold().split()
+        results = []
+        for fid in self._facilities:
+            campground = self.get_campground(fid)
+            if not campground or (state and campground["state"] != state):
+                continue
+            text = (campground["name"] + " " + campground["rec_area_name"]).casefold()
+            if all(word in text for word in words):
+                results.append(campground)
+        results.sort(key=lambda f: (f["name"].casefold(), f["id"]))
+        return results[:limit]
+
+    def get_campsite_metadata(self, facility_id: str) -> dict:
+        """Load optional site/map exports lazily; a missing export leaves a usable grid."""
+        with self._metadata_lock:
+            if facility_id in self._campsite_metadata:
+                self._campsite_metadata.move_to_end(facility_id)
+                return self._campsite_metadata[facility_id]
+            campground = self.get_campground(facility_id)
+            result = {"sites": {}, "map_url": campground["map_url"] if campground else ""}
+            if not campground:
+                return result
+            path = os.path.join(self._ridb_dir, "Campsites_API_v1.csv")
+            if os.path.isfile(path):
+                with open(path, newline="", encoding="utf-8-sig") as stream:
+                    for row in csv.DictReader(stream):
+                        if row.get("FacilityID") != facility_id:
+                            continue
+                        sid = row.get("CampsiteID", "")
+                        if not sid.isdigit():
+                            continue
+                        lat, lon = _coordinates(row.get("CampsiteLatitude"), row.get("CampsiteLongitude"))
+                        accessible = {"true": True, "false": False}.get(row.get("CampsiteAccessible", "").lower())
+                        result["sites"][sid] = {"lat": lat, "lon": lon, "accessible": accessible}
+            media_path = os.path.join(self._ridb_dir, "Media_API_v1.csv")
+            if not result["map_url"] and os.path.isfile(media_path):
+                with open(media_path, newline="", encoding="utf-8-sig") as stream:
+                    for row in csv.DictReader(stream):
+                        if (row.get("EntityID") == facility_id
+                                and row.get("EntityType") in {"Asset", "Facility", "Campground"}
+                                and "map" in row.get("Title", "").casefold()):
+                            result["map_url"] = _map_url(row.get("URL", ""))
+                            if result["map_url"]:
+                                break
+            self._campsite_metadata[facility_id] = result
+            while len(self._campsite_metadata) > 64:
+                self._campsite_metadata.popitem(last=False)
+            return result
+
+
+def _coordinates(latitude, longitude) -> tuple[float | None, float | None]:
+    try:
+        lat, lon = float(latitude), float(longitude)
+        if math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180 and (lat, lon) != (0, 0):
+            return lat, lon
+    except (TypeError, ValueError):
+        pass
+    return None, None
+
+
+def _map_url(value: str) -> str:
+    """Allow only web links, never executable or local URLs from imported data."""
+    try:
+        parsed = urlsplit(value)
+        return value if parsed.scheme in {"https", "http"} and parsed.hostname and not parsed.username else ""
+    except ValueError:
+        return ""
