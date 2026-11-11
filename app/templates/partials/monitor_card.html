@@ -82,6 +82,10 @@
     {% endif %}
   </div>
 
+  {% if monitor_error %}
+  <div class="alert alert-error" role="alert">{{ monitor_error }}</div>
+  {% endif %}
+
   {# Split point: name, park, facility and trailheads stay visible so the list
      can be scanned; dates, stats and actions collapse. The open/closed state is
      remembered per monitor in dashboard.html, because HTMX replaces this whole

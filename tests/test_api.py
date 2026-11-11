@@ -7,6 +7,7 @@ could create a monitor the poll loop could never service.
 import importlib
 import os
 from datetime import date, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -161,6 +162,34 @@ def test_permit_nights_round_trips(client):
     assert stored["nights"] == 3
 
 
+@pytest.mark.parametrize("facility_id", ["4675310", "4675324", "4675325", "4675326"])
+def test_angels_landing_monitor_is_rejected_with_lottery_guidance(client, facility_id):
+    resp = client.post("/api/monitors", json=permit_payload(
+        facility_ids=[facility_id],
+        facility_names={facility_id: "Angels Landing"},
+        facility_types={facility_id: "Permit"},
+        selected_divisions={},
+    ))
+
+    assert resp.status_code == 422
+    assert "day-before lottery" in resp.text
+    assert "6 people" in resp.text
+    assert client.app_ref.state.manager.list_monitors() == []
+
+
+def test_angels_landing_picker_explains_lottery_instead_of_offering_divisions(client):
+    with patch("app.monitor_engine.get_permit_divisions",
+               return_value={"467532502": "Start between 9AM - 12PM"}) as lookup:
+        resp = client.get("/api/permit-divisions?facility_id=4675325")
+
+    assert resp.status_code == 200
+    assert "day-before lottery" in resp.text
+    assert "12:01 AM" in resp.text
+    assert 'href="https://www.recreation.gov/permits/4675325"' in resp.text
+    assert 'type="checkbox"' not in resp.text
+    lookup.assert_not_called()
+
+
 def test_campground_monitor_stores_no_nights(client):
     """nights is permit-only; a campground monitor must not carry a value."""
     resp = client.post("/api/monitors", json=campground_payload())
@@ -182,6 +211,23 @@ def _make_monitor(client, status="stopped", **over):
     mon.update(over)
     client.app_ref.state.manager.add_monitor(mon)
     return mon["id"]
+
+
+def test_existing_angels_landing_monitor_stays_stopped_with_lottery_guidance(client):
+    mid = _make_monitor(
+        client, name="Zion Angels Landing",
+        facilities=[{"id": "4675325", "name": "Angels Landing", "type": "Permit"}],
+        check_in="", check_out="", entry_date=ENTRY_DATE,
+    )
+    manager = client.app_ref.state.manager
+    with patch.object(manager, "start_monitor", new_callable=AsyncMock) as start:
+        resp = client.post(f"/api/monitors/{mid}/start")
+
+    assert resp.status_code == 200  # HTMX swaps the stopped card with its explanation.
+    assert "day-before lottery" in resp.text
+    assert 'role="alert"' in resp.text
+    assert manager.get_monitor(mid)["status"] == "stopped"
+    start.assert_not_awaited()
 
 
 def test_edit_dates_on_a_stopped_monitor(client):

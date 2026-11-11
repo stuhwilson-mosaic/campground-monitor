@@ -60,6 +60,22 @@ SITE_TYPE_FILTERS: dict[str, str] = {
 log = logging.getLogger(__name__)
 
 
+def permit_monitoring_notice(facility_id: str) -> str | None:
+    """Explain known permits that have no openings for this monitor to watch."""
+    # Angels Landing's four seasonal permit IDs, verified 2026-11-10:
+    # https://www.nps.gov/zion/planyourvisit/angels-landing-hiking-permits.htm
+    # Do not use has_lottery to detect this: Yosemite also has a lottery AND
+    # reservable wilderness quota, so that flag does not mean lottery-only.
+    if facility_id in {"4675310", "4675324", "4675325", "4675326"}:
+        return (
+            "Angels Landing permits are lottery-only. Canceled seasonal permits "
+            "roll into the day-before lottery, so availability cannot be monitored. "
+            "Apply on Recreation.gov from 12:01 AM to 3 PM Mountain Time the day "
+            "before your hike, for up to 6 people per application."
+        )
+    return None
+
+
 def dates_needed(check_in: str, check_out: str) -> list[str]:
     """Return night-dates required for a stay (check-in through night before check-out).
 
@@ -350,6 +366,10 @@ def check_permit(
         List of dicts for each available division:
         [{"division_id", "division_name", "remaining", "total", "is_walkup"}, ...]
     """
+    notice = permit_monitoring_notice(facility_id)
+    if notice:
+        raise ValueError(notice)
+
     target = date.fromisoformat(entry_date)
     first_of_month = date(target.year, target.month, 1)
     last_day = calendar.monthrange(target.year, target.month)[1]

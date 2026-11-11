@@ -568,6 +568,16 @@ def test_check_permit_empty_division_ids_returns_all():
     assert len(result) == 2
 
 
+@pytest.mark.parametrize("facility_id", ["4675310", "4675324", "4675325", "4675326"])
+def test_check_permit_rejects_angels_landing_without_requesting_availability(facility_id):
+    """Lottery cancellations cannot be watched through the wilderness API."""
+    with patch("app.monitor_engine.requests.get") as mock_get:
+        with pytest.raises(ValueError, match="Angels Landing.*lottery"):
+            check_permit(facility_id, "2026-11-12", party_size=8)
+
+    mock_get.assert_not_called()
+
+
 def test_send_email_passes_a_socket_timeout():
     """smtplib.SMTP blocks forever without an explicit timeout.
 

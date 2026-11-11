@@ -104,8 +104,12 @@ that split runs through the whole codebase:
 
 A stay spanning two months makes two campground calls and merges them. Permit support targets
 "permitinyo"-style permits (e.g. Yosemite Wilderness); lottery-only permits (e.g. Half Dome) use
-a different API and won't return availability. Availability checks need no API key — just the
-browser-like headers in `config.py`.
+a different API and are not supported. Angels Landing is lottery-only: canceled seasonal
+permits roll into the day-before lottery rather than becoming reservable openings. The app
+explains this in the permit picker and rejects creating or starting Angels Landing monitors.
+Apply on Recreation.gov from 12:01 a.m. to 3 p.m. Mountain Time the day before the hike, with
+up to six people per application; see the [NPS permit rules](https://www.nps.gov/zion/planyourvisit/angels-landing-hiking-permits.htm).
+Availability checks need no API key — just the browser-like headers in `config.py`.
 
 ### Monitor lifecycle (the core loop)
 
