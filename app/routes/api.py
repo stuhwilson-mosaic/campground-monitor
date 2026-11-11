@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, model_validator
 
 from app.auth import get_current_user, require_monitor_access
-from app.monitor_engine import SITE_TYPE_FILTERS
+from app.monitor_engine import SITE_TYPE_FILTERS, permit_monitoring_notice
 from app.telemetry import audit
 
 router = APIRouter(prefix="/api")
@@ -86,7 +86,7 @@ def _fail(message: str):
     raise ValueError(message)
 
 
-def _card_response(request: Request, monitor_id: str) -> HTMLResponse:
+def _card_response(request: Request, monitor_id: str, error: str = "") -> HTMLResponse:
     """Render the monitor_card partial for the given monitor ID."""
     manager = request.app.state.manager
     templates = request.app.state.templates
@@ -95,13 +95,19 @@ def _card_response(request: Request, monitor_id: str) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "partials/monitor_card.html",
-        {"m": monitor, "today": today},
+        {"m": monitor, "today": today, "monitor_error": error},
     )
 
 
 @router.post("/monitors/{monitor_id}/start", response_class=HTMLResponse)
 async def start_monitor(monitor_id: str, request: Request):
     user, monitor = require_monitor_access(request, monitor_id)
+    facilities = monitor.get("facilities") or [{"id": monitor.get("facility_id", "")}]
+    for facility in facilities:
+        notice = permit_monitoring_notice(facility["id"])
+        if notice:
+            return _card_response(request, monitor_id, error=notice)
+
     manager = request.app.state.manager
     await manager.start_monitor(monitor_id)
     await audit(request, "monitor.start", username=user.username,
@@ -177,6 +183,11 @@ class CreateMonitorRequest(BaseModel):
         quota applies to the entry trailhead on the entry date only. It is
         recorded for display and for what to actually book.
         """
+        for facility_id in self.facility_ids:
+            notice = permit_monitoring_notice(facility_id)
+            if notice:
+                _fail(notice)
+
         kind = resolve_facility_type(self.facility_ids, self.facility_types)
         validate_dates_for_type(
             kind, self.check_in, self.check_out, self.entry_date, self.nights
@@ -528,6 +539,14 @@ async def api_permit_divisions(request: Request, facility_id: str = ""):
         return HTMLResponse("Unauthorized", status_code=401)
     if not facility_id:
         return HTMLResponse("")
+
+    notice = permit_monitoring_notice(facility_id)
+    if notice:
+        return HTMLResponse(
+            f'<p class="no-facilities" role="alert">{escape(notice)} '
+            f'<a href="https://www.recreation.gov/permits/{escape(facility_id)}" '
+            'target="_blank" rel="noopener">Apply on Recreation.gov</a></p>'
+        )
 
     try:
         divisions = await asyncio.to_thread(get_permit_divisions, facility_id)
